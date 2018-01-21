@@ -79,7 +79,7 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
   probe.monitor = m_id;
   probe.src = m_id;
   // probe.dst = 0;
-  probe.time = Simulator::Now ().GetTimeStep();
+  // probe.time = Simulator::Now ().GetTimeStep();
 
   Ptr<Packet> packet = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
   ProbeTag probeTag;
@@ -94,6 +94,8 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
       NS_LOG_WARN("switch " << m_id << " send probe failed, out_port: " << out_ports[i]);
   }
 
+  m_lastTime = Simulator::Now ();
+
   if (Simulator::Now() + m_probePeriod < m_simuTime)
     Simulator::Schedule (m_probePeriod, &OpenFlowSwitchNetDevice::SendProbe, this);
 }
@@ -102,32 +104,12 @@ void OpenFlowSwitchNetDevice::HandleForwardProbe(ProbeInfo &probe)
 {
   NS_LOG_FUNCTION(this);
 
-  // forward probe packet
-  std::map<uint16_t, std::vector<uint16_t> >::iterator it = m_forward_chain.find(probe.monitor);
-  if (it != m_forward_chain.end()) {
-    probe.src = m_id;
-    probe.time = Simulator::Now ().GetTimeStep();
-
-    Ptr<Packet> packet = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
-    ProbeTag probeTag;
-    packet->AddPacketTag (probeTag);
-
-    std::vector<uint16_t>& out_ports = it->second;
-    for (uint16_t i = 0; i < out_ports.size(); ++i) {
-      ofi::Port& p = m_ports[out_ports[i]];
-      if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048))
-        NS_LOG_WARN("switch " << m_id << " transpond forward probe succeed , out_port: " << out_ports[i]);
-      else
-        NS_LOG_WARN("switch " << m_id << " transpond forward probe failed, out_port: " << out_ports[i]);
-    }
-  }
-
   // back probe packet
   std::map<uint16_t, uint16_t>::iterator iter = m_back_chain.find(probe.monitor);
   if (iter != m_back_chain.end()) {
     probe.flag = 1;
     probe.dst = m_id;
-    probe.time = Simulator::Now ().GetTimeStep() - probe.time;
+    // probe.time = Simulator::Now ().GetTimeStep() - probe.time;
 
     Ptr<Packet> packet = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
     ProbeTag probeTag;
@@ -142,6 +124,27 @@ void OpenFlowSwitchNetDevice::HandleForwardProbe(ProbeInfo &probe)
   else {
     NS_LOG_WARN("switch " << m_id << " can't find out port to send back probe");
   }
+
+  // forward probe packet
+  std::map<uint16_t, std::vector<uint16_t> >::iterator it = m_forward_chain.find(probe.monitor);
+  if (it != m_forward_chain.end()) {
+    probe.flag = 0;
+    probe.src = m_id;
+    // probe.time = Simulator::Now ().GetTimeStep();
+
+    Ptr<Packet> packet = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
+    ProbeTag probeTag;
+    packet->AddPacketTag (probeTag);
+
+    std::vector<uint16_t>& out_ports = it->second;
+    for (uint16_t i = 0; i < out_ports.size(); ++i) {
+      ofi::Port& p = m_ports[out_ports[i]];
+      if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048))
+        NS_LOG_WARN("switch " << m_id << " transpond forward probe succeed , out_port: " << out_ports[i]);
+      else
+        NS_LOG_WARN("switch " << m_id << " transpond forward probe failed, out_port: " << out_ports[i]);
+    }
+  }
 }
 
 void OpenFlowSwitchNetDevice::HandleBackProbe(ProbeInfo &probe, Ptr<const Packet> packet)
@@ -149,7 +152,7 @@ void OpenFlowSwitchNetDevice::HandleBackProbe(ProbeInfo &probe, Ptr<const Packet
   NS_LOG_FUNCTION(this);
 
   if (probe.monitor == m_id) {
-    std::cout << "At time " << Simulator::Now ().GetSeconds() << "s switch " << m_id << " receive a back probe\n";
+    CalculateDelay(probe);
     return;
   }
 
@@ -165,6 +168,32 @@ void OpenFlowSwitchNetDevice::HandleBackProbe(ProbeInfo &probe, Ptr<const Packet
     NS_LOG_WARN("switch " << m_id << " can't find out port to send back probe");
   }
 }
+
+void OpenFlowSwitchNetDevice::CalculateDelay(ProbeInfo &probe)
+{
+  NS_LOG_FUNCTION(this);
+  // std::cout << "At time " << Simulator::Now ().GetSeconds() << "s switch " << m_id << " receive a back probe\n";
+  m_linkRTT[probe.src][probe.dst] = (Simulator::Now() - m_lastTime).GetTimeStep();
+
+  // get rtt of src switch
+  int64_t rtt_src = -1;
+  for (std::map<uint16_t, std::map<uint16_t, int64_t> >::iterator it = m_linkRTT.begin(); it != m_linkRTT.end(); ++it) {
+    for (std::map<uint16_t, int64_t>::iterator i = it->second.begin(); i != it->second.end(); ++i) {
+      if (i->first == probe.src) {
+        rtt_src = i->second;
+        break;
+      }
+    }
+  }
+
+  if (rtt_src == -1) return;
+
+  // int64_t delay = m_linkRTT[probe.src][probe.dst] - rtt_src;
+  
+  
+}
+
+
 
 /************************wangxing added************************/
 
@@ -259,6 +288,7 @@ OpenFlowSwitchNetDevice::OpenFlowSwitchNetDevice ()
   m_probeId = 0;
   m_probePeriod = TimeStep(0);
   m_simuTime = TimeStep(0);
+  m_lastTime = TimeStep(0);
 }
 
 OpenFlowSwitchNetDevice::~OpenFlowSwitchNetDevice ()
@@ -287,8 +317,17 @@ OpenFlowSwitchNetDevice::DoDispose ()
   NetDevice::DoDispose ();
 
   // wangxing added
+  std::cout << "swicth " << m_id << ":\n";
+  for (std::map<uint16_t, std::map<uint16_t, int64_t> >::iterator it = m_linkRTT.begin(); it != m_linkRTT.end(); ++it) {
+    for (std::map<uint16_t, int64_t>::iterator i = it->second.begin(); i != it->second.end(); ++i) {
+      Time rtt = TimeStep(i->second);
+      std::cout << "<" << it->first << "," << i->first << ">: " << rtt.GetMicroSeconds() << "\n";
+    }
+  }
+  std::cout << "\n";
   m_back_chain.clear();
   m_forward_chain.clear();
+  m_linkRTT.clear();
 }
 
 void

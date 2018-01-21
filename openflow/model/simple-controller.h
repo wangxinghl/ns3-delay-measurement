@@ -32,6 +32,7 @@ private:
   void InstallMonitor(uint16_t node);
   void SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows);
 
+  void ReceiveDelay();
 	void ReceivePacketIn(ofpbuf* buffer);
 	void ReceivePortStatus(ofpbuf* buffer);
 
@@ -41,7 +42,7 @@ private:
 
   std::map<uint16_t, std::set<uint16_t> > m_solution;
 
-  std::vector<bool> m_flag;  
+  std::vector<std::vector<int64_t> > m_linkDelay; // vector<src, vector<dst, delay> >
 };
 
 }	// namespace ns3

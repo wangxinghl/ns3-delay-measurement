@@ -50,9 +50,6 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   //     std::cout << "\n";
   // }
 
-  for (uint16_t i = 0; i < m_topo->m_numSw; ++i) {
-    m_flag.push_back(false);
-  }
   SetFlowEntry();
 }
 
