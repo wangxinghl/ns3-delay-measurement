@@ -42,6 +42,14 @@ struct probe_control_info
   uint16_t out_port[0];
 };
 
+struct probe_report_info
+{
+  ofp_header header;
+  uint16_t src;
+  uint16_t dst;
+  int64_t delay;
+};
+
 /**
  * The defination of openflow flow entry.
  */

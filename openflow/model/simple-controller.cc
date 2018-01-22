@@ -30,6 +30,17 @@ SimpleController::SimpleController ()
 SimpleController::~SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
+
+  for (LinkDelay::iterator it = m_linkDelay.begin(); it != m_linkDelay.end(); ++it) {
+    for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
+      Time delay(iter->second);
+      std::cout << "<" << it->first << "," << iter->first << "> " << delay.GetMicroSeconds() << "\n";
+    }
+  }
+
+  m_swtches.clear();
+  m_solution.clear();
+  m_linkDelay.clear();
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
@@ -42,13 +53,6 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   maxflow.Calculate(topo, 2, 5);
   maxflow.Solution(m_solution);
   // maxflow.ShowSolution();
-  // for (std::map<uint16_t, std::vector<uint16_t> >::iterator it = m_solution.begin(); it != m_solution.end(); it++) {
-  //     std::cout << it->first << "(" << it->second.size() <<"): ";
-  //     for (uint16_t i = 0; i < it->second.size(); ++i) {
-  //         std::cout << it->second[i] << " ";
-  //     }
-  //     std::cout << "\n";
-  // }
 
   SetFlowEntry();
 }
@@ -73,7 +77,10 @@ void SimpleController::ReceiveFromSwitch (Ptr<OpenFlowSwitchNetDevice> swtch, of
     }
 
     uint8_t type = GetPacketType(buffer);
-    switch(type){
+    switch(type) {
+      case OFPT_HELLO:
+        ReceiveDelay(buffer);
+        break;
     	case OFPT_PACKET_IN:
     		ReceivePacketIn(buffer);
     		break;
@@ -137,30 +144,25 @@ void SimpleController::InstallMonitor(uint16_t node)
   
   pci->type = PROBE_MONITOR;
   pci->monitor = node;
-  pci->period = Seconds(0.1).GetTimeStep();
+  pci->period = Seconds(1).GetTimeStep();
 
   SendToSwitch(m_swtches[pci->monitor], pci, pci->header.length);
 }
-
 
 void SimpleController::SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows)
 { 
   NS_LOG_FUNCTION(this);
 
-  // std::cout << "\nmonitor " << monitor << "\n";
   InstallMonitor(monitor);
   for (std::map<uint16_t, std::vector<uint16_t> >::iterator it = flows.begin(); it != flows.end() ; ++it) {
-    // std::cout << "node " << it->first << ": ";
     uint16_t  num = it->second.size();
     
     uint16_t len = sizeof(probe_control_info) + sizeof(uint16_t) * num;
     probe_control_info* pci_f = (probe_control_info*)malloc(len);   // forward flow
-
     pci_f->header.version = OFP_VERSION;
     pci_f->header.type = OFPT_HELLO;
     pci_f->header.length = htons (len);
     pci_f->header.xid = 0;
-
     pci_f->type = PROBE_FLOW;
     pci_f->flag = 0;    // forward: 0; back: 1
     pci_f->monitor = monitor;
@@ -168,32 +170,34 @@ void SimpleController::SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::v
     for (uint16_t i = 0; i < num; ++i) {
       uint16_t length = sizeof(probe_control_info) + sizeof(uint16_t);
       probe_control_info* pci_b = (probe_control_info*)malloc(length);  // back flow
-      
       pci_b->header.version = OFP_VERSION;
       pci_b->header.type = OFPT_HELLO;
-      pci_b->header.length = htons (sizeof(probe_control_info));
+      pci_b->header.length = htons (length);
       pci_b->header.xid = 0;
-
       pci_b->type = PROBE_FLOW;
       pci_b->flag = 1;    // forward: 0; back: 1
       pci_b->monitor = monitor;
       pci_b->out_port[0] = m_topo->m_edges[it->second[i]].dpt;
-
       SendToSwitch(m_swtches[m_topo->m_edges[it->second[i]].dst - m_topo->m_numHost], pci_b, pci_b->header.length);   
 
       // for src node to distribute probe copy to other node
       pci_f->out_port[i] = m_topo->m_edges[it->second[i]].spt;
-
-      // Edge &edge = m_topo->m_edges[it->second[i]];
-      // std::cout << "(" << pci_f->out_port[i] << ", <" << edge.src << "," << edge.dst
-      //           << ">, " << pci_b->out_port[0] << "), ";
     }
-    // std::cout << std::endl;
     
-    // NS_ASSERT_MSG(false, sizeof(probe_control_info));
     // for src node to distribute probe copy to other node
-    SendToSwitch(m_swtches[it->first - m_topo->m_numHost], pci_f, pci_f->header.length);   
+    SendToSwitch(m_swtches[it->first - m_topo->m_numHost], pci_f, pci_f->header.length);
   }
+}
+
+void SimpleController::ReceiveDelay(ofpbuf* buffer)
+{
+  NS_LOG_FUNCTION(this);
+  
+  probe_report_info *pci = (probe_report_info*)ofpbuf_try_pull(buffer, sizeof(probe_report_info));
+  if (pci->src < pci->dst)
+    m_linkDelay[pci->src][pci->dst] = pci->delay;
+  else
+    m_linkDelay[pci->dst][pci->src] = pci->delay;
 }
 
 void SimpleController::ReceivePacketIn(ofpbuf* buffer)

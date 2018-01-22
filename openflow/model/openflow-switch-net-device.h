@@ -99,20 +99,34 @@ private:
     uint16_t monitor;
     uint16_t src;
     uint16_t dst;
-    // int64_t time;
   };
 
-  void HandleForwardProbe(ProbeInfo &probe);
-  void HandleBackProbe(ProbeInfo &probe, Ptr<const Packet> packet);
+  struct ProbeKey
+  {
+    uint8_t flag;   // 0: forward; 1: back
+    uint16_t monitor;
 
-  void CalculateDelay(ProbeInfo &probe);
-  // chain for probe packet;
+    bool operator<(const ProbeKey &another) const
+    {
+      if (flag != another.flag)
+        return flag < another.flag;
+      else
+        return monitor < another.monitor;
+    }
+  };
+
+  void TranspondProbe(Ptr<const Packet> packet, uint16_t in_port);
+
+  void HandleProbe(ProbeInfo &probe);
+
   uint8_t m_probeId;
-  Time m_probePeriod;
+  
   Time m_simuTime;
   Time m_lastTime;
-  std::map<uint16_t, uint16_t> m_back_chain;    // for back probe, map<monitor, out_port>
-  std::map<uint16_t, std::vector<uint16_t> > m_forward_chain; // for forward probe, map<monitor, vecto<out_port> >
+  Time m_probePeriod;
+
+  typedef std::map<ProbeKey, std::vector<uint16_t> > ProbeChain;
+  ProbeChain m_probe_chain; // map<ProbeKey, vecto<out_port> >
 
   std::map<uint16_t, std::map<uint16_t, int64_t> > m_linkRTT; // map<src, map<dst, delay> >
 /************************wangxing added************************/
