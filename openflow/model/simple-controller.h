@@ -27,6 +27,7 @@ public:
   void ReceiveFromSwitch (Ptr<OpenFlowSwitchNetDevice> swtch, ofpbuf* buffer);
 
 private:
+  void SetDataFlowEntry(void);
   void SetFlowEntry(void);
   
   void InstallMonitor(uint16_t node);
@@ -42,8 +43,8 @@ private:
 
   std::map<uint16_t, std::set<uint16_t> > m_solution;
 
-  typedef std::map<uint16_t, std::map<uint16_t, int64_t> > LinkDelay;
-  LinkDelay m_linkDelay; // vector<src, vector<dst, delay> >
+  Delay_t m_delay; // vector<src, vector<dst, delay> >
+  Delay_t m_delayReal; // vector<src, vector<dst, delay> >
 };
 
 }	// namespace ns3

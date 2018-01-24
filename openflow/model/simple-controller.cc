@@ -31,16 +31,18 @@ SimpleController::~SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
 
-  for (LinkDelay::iterator it = m_linkDelay.begin(); it != m_linkDelay.end(); ++it) {
+  for (Delay_t::iterator it = m_delay.begin(); it != m_delay.end(); ++it) {
     for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
       Time delay(iter->second);
-      std::cout << "<" << it->first << "," << iter->first << "> " << delay.GetMicroSeconds() << "\n";
+      Time delay_real(m_delayReal[it->first][iter->first]);
+      std::cout << "<" << it->first << "," << iter->first << "> "
+                << delay_real.GetMilliSeconds() << " " << delay.GetMilliSeconds() << "\n";
     }
   }
 
   m_swtches.clear();
   m_solution.clear();
-  m_linkDelay.clear();
+  m_delay.clear();
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
@@ -55,6 +57,8 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   // maxflow.ShowSolution();
 
   SetFlowEntry();
+
+  SetDataFlowEntry();
 }
 
 void SimpleController::AddSwitch (Ptr<OpenFlowSwitchNetDevice> swtch)
@@ -90,6 +94,54 @@ void SimpleController::ReceiveFromSwitch (Ptr<OpenFlowSwitchNetDevice> swtch, of
     	default:
     		NS_LOG_ERROR ("Can't receive this ofp message!" << (int)type);
     }
+}
+
+void SimpleController::SetDataFlowEntry(void)
+{
+  NS_LOG_FUNCTION(this);
+  
+  for (uint16_t src = 0; src < m_topo->m_numHost; ++src) {
+    for (uint16_t dst = 0; dst < m_topo->m_numHost; ++dst) {
+      if (src == dst) continue;
+      // Create matching key.
+      sw_flow_key key;
+      key.wildcards = 0;
+      // key.flow.in_port = htons();
+      key.flow.dl_vlan = htons(OFP_VLAN_NONE);
+      key.flow.dl_type = htons(ETH_TYPE_IP);
+      m_topo->m_macs[src].CopyTo(key.flow.dl_src);
+      m_topo->m_macs[dst].CopyTo(key.flow.dl_dst);
+      key.flow.nw_proto = -1;
+      key.flow.nw_src = htonl(m_topo->m_ips[src]);
+      key.flow.nw_dst = htonl(m_topo->m_ips[dst]);
+      key.flow.tp_src = htons(-1);
+      key.flow.tp_dst = htons(-1);
+      key.flow.mpls_label1 = htonl (MPLS_INVALID_LABEL);    // For MPLS: Top of label stack
+      key.flow.mpls_label2 = htonl (MPLS_INVALID_LABEL);
+      key.flow.reserved = 0;
+
+      // Create output-to-port action
+      ofp_action_output x[1];
+      x[0].type = htons (OFPAT_OUTPUT);
+      x[0].len = htons (sizeof(ofp_action_output));
+      // x[0].port = out_port;
+
+      Path_t path = m_topo->Dijkstra(src, dst);
+      uint16_t size = path.size ();
+      for (uint16_t i = size - 1; i > 0; --i) {
+        // get switch
+        uint16_t sw = m_topo->m_edges[path[i]].dst - m_topo->m_numHost;
+        // setup in_port
+        key.flow.in_port = htons(m_topo->m_edges[path[i]].dpt);
+        // setup out_port
+        x[0].port = m_topo->m_edges[path[i - 1]].spt;
+
+        // Create a new flow and setup on specified switch
+        ofp_flow_mod* ofm = BuildFlow (key, -1, OFPFC_ADD, x, sizeof(x), OFP_FLOW_PERMANENT, OFP_FLOW_PERMANENT);
+        SendToSwitch (m_swtches[sw], ofm, ofm->header.length);
+      }
+    }
+  }
 }
 
 void SimpleController::SetFlowEntry(void)
@@ -128,6 +180,7 @@ void SimpleController::SetFlowEntry(void)
       it->second = temp;
     }
     SendProbeFlow(it->first - m_topo->m_numHost, flows);
+    break;
   }
 }
 
@@ -194,15 +247,20 @@ void SimpleController::ReceiveDelay(ofpbuf* buffer)
   NS_LOG_FUNCTION(this);
   
   probe_report_info *pci = (probe_report_info*)ofpbuf_try_pull(buffer, sizeof(probe_report_info));
-  if (pci->src < pci->dst)
-    m_linkDelay[pci->src][pci->dst] = pci->delay;
-  else
-    m_linkDelay[pci->dst][pci->src] = pci->delay;
+  if (pci->src < pci->dst){
+    m_delay[pci->src][pci->dst] = pci->rtt;
+    m_delayReal[pci->src][pci->dst] = pci->rtt_real;
+  }
+  else{
+    m_delay[pci->dst][pci->src] = pci->rtt;
+    m_delayReal[pci->dst][pci->src] = pci->rtt_real;
+  }
 }
 
 void SimpleController::ReceivePacketIn(ofpbuf* buffer)
 {
 	NS_LOG_FUNCTION(this);
+  std::cout << "ReceivePacketIn\n";
 }
 
 void SimpleController::ReceivePortStatus(ofpbuf* buffer)

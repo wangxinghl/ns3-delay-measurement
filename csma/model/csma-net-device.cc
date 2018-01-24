@@ -523,6 +523,7 @@ CsmaNetDevice::TransmitStart (void)
 
           Time tEvent = m_bps.CalculateBytesTxTime (m_currentPkt->GetSize ());
           NS_LOG_LOGIC ("Schedule TransmitCompleteEvent in " << tEvent.GetSeconds () << "sec");
+          std::cout << Simulator::Now().GetMicroSeconds() << " " << tEvent.GetMicroSeconds () << "us: ";
           Simulator::Schedule (tEvent, &CsmaNetDevice::TransmitCompleteEvent, this);
         }
     }

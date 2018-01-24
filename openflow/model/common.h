@@ -47,7 +47,8 @@ struct probe_report_info
   ofp_header header;
   uint16_t src;
   uint16_t dst;
-  int64_t delay;
+  int64_t rtt;
+  int64_t rtt_real;
 };
 
 /**
@@ -83,6 +84,8 @@ typedef std::vector<uint16_t> Path_t;
  * The definition of path container, contains multiple paths
  */
 typedef std::vector<Path_t> Paths_t;
+
+typedef std::map<uint16_t, std::map<uint16_t, int64_t> > Delay_t;
 
 /**
  * The templates to allocate or delete one-dimensional array, two-dimensional array and three-dimensional array.

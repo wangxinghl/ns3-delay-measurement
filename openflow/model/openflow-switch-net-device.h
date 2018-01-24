@@ -47,6 +47,7 @@
 #include <set>
 
 #include "openflow-interface.h"
+#include "common.h"
 
 namespace ns3 {
 
@@ -94,11 +95,14 @@ public:
 private:
   struct ProbeInfo
   {
+    uint32_t idx;
     uint8_t flag;   // 0: forward; 1: back
-    uint8_t idx;
+    uint8_t pad;
     uint16_t monitor;
     uint16_t src;
     uint16_t dst;
+    int64_t time;
+    int64_t rtt;
   };
 
   struct ProbeKey
@@ -119,7 +123,7 @@ private:
 
   void HandleProbe(ProbeInfo &probe);
 
-  uint8_t m_probeId;
+  uint32_t m_probeId;
   
   Time m_simuTime;
   Time m_lastTime;
@@ -128,7 +132,8 @@ private:
   typedef std::map<ProbeKey, std::vector<uint16_t> > ProbeChain;
   ProbeChain m_probe_chain; // map<ProbeKey, vecto<out_port> >
 
-  std::map<uint16_t, std::map<uint16_t, int64_t> > m_linkRTT; // map<src, map<dst, delay> >
+  Delay_t m_linkRTT;
+
 /************************wangxing added************************/
 
 public:

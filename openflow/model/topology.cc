@@ -285,7 +285,7 @@ std::vector<NetDeviceContainer> Topology::DoConnect (std::ifstream &fin, std::st
   // Set link rate, the queue of net device
   CsmaHelper csma;
   csma.SetChannelAttribute ("DataRate", StringValue (bandwidth));
-  csma.SetChannelAttribute ("Delay", TimeValue (MicroSeconds (0)));
+  csma.SetChannelAttribute ("Delay", TimeValue (MilliSeconds (2)));
   //csma.SetQueue (queue, "Mode", StringValue ("QUEUE_MODE_PACKETS"), "MaxPackets", UintegerValue (UINT32_MAX));
   // csma.SetDeviceAttribute ("EncapsulationMode", StringValue ("Dix"));
 

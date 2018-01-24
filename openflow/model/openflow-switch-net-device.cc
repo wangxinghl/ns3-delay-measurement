@@ -20,7 +20,6 @@
 #include "openflow-switch-net-device.h"
 #include "ns3/udp-l4-protocol.h"
 #include "ns3/tcp-l4-protocol.h"
-#include "common.h"
 
 namespace ns3 {
 
@@ -71,18 +70,20 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
   NS_LOG_FUNCTION(this);
 
   ProbeInfo probe;
-  probe.flag = 0;
   probe.idx = m_probeId++;
+  probe.flag = 0;
   probe.monitor = m_id;
   probe.src = m_id;
+  // probe.dst = m_id;
+  probe.time = Simulator::Now().GetTimeStep();
 
   Ptr<Packet> packet = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
   ProbeTag probeTag;
   packet->AddPacketTag (probeTag);
 
   ProbeKey key;
-  key.flag = 0;
-  key.monitor = m_id;
+  key.flag = probe.flag;
+  key.monitor = probe.monitor;
   std::vector<uint16_t>& out_ports = m_probe_chain[key];
   for (uint16_t i = 0; i < out_ports.size(); ++i) {
     ofi::Port& p = m_ports[out_ports[i]];
@@ -94,8 +95,8 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
 
   m_lastTime = Simulator::Now ();
 
-  if (Simulator::Now() + m_probePeriod < m_simuTime)
-    Simulator::Schedule (m_probePeriod, &OpenFlowSwitchNetDevice::SendProbe, this);
+  // if (Simulator::Now() + m_probePeriod < m_simuTime)
+  //   Simulator::Schedule (m_probePeriod, &OpenFlowSwitchNetDevice::SendProbe, this);
 }
 
 void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t in_port)
@@ -104,21 +105,36 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
 
   ProbeInfo probe;
   packet->CopyData((uint8_t*)&probe, sizeof(ProbeInfo));
-
+  
+  // monitor receive probe
   if (probe.monitor == m_id) {
+    if (probe.src == m_id) {
+      probe.rtt += (Simulator::Now().GetTimeStep() - probe.time);
+    }
+
     HandleProbe(probe);
     return;
   }
 
+  // lookup probe flow table
   ProbeKey key;
   key.flag = probe.flag;
   key.monitor = probe.monitor;
+  ProbeChain::iterator it = m_probe_chain.find(key);
 
   if (probe.flag) {   // for back probe, flag == 1
-    ProbeChain::iterator it = m_probe_chain.find(key);
+    Ptr<const Packet> pkt = packet;
+    if (probe.src == m_id) {
+      probe.rtt += (Simulator::Now().GetTimeStep() - probe.time);
+      pkt = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
+      ProbeTag probeTag;
+      pkt->AddPacketTag (probeTag);
+    }
+
     NS_ASSERT(it != m_probe_chain.end());
-    ofi::Port& p = m_ports[it->second[0]];  // lookup flow
-    if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048))
+
+    ofi::Port& p = m_ports[it->second[0]];
+    if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048))
       NS_LOG_WARN("switch " << m_id << " transpond back probe succeed " << it->second[0]);
     else
       NS_LOG_WARN("switch " << m_id << " transpond back probe failed " << it->second[0]);
@@ -130,21 +146,28 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
     // return back probe
     probe.flag = 1;   // set flag to 1
     probe.dst = m_id; // set dst to current switch
+    probe.rtt = Simulator::Now().GetTimeStep() - probe.time;
+
+    probe.time = Simulator::Now().GetTimeStep();
+    
     pkt = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
     pkt->AddPacketTag (probeTag);
+
     ofi::Port& p = m_ports[in_port];  // send the back probe through out_port
     if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048))
       NS_LOG_WARN("switch " << m_id << " send back probe succeed " << in_port);
     else
       NS_LOG_WARN("switch " << m_id << " send back probe failed " << in_port);
 
+
     // transpond forward probe
-    ProbeChain::iterator it = m_probe_chain.find(key);
     if (it != m_probe_chain.end()) {    // the result may be empty, note that the forward probe needn't to transpond
       probe.flag = 0;   // set flag to 1
       probe.src = m_id; // set src to current switch
+
       pkt = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
       pkt->AddPacketTag (probeTag);
+      
       for (uint16_t i = 0; i < it->second.size(); ++i) {
         ofi::Port& p = m_ports[it->second[i]];
         if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048))
@@ -159,31 +182,36 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
 void OpenFlowSwitchNetDevice::HandleProbe(ProbeInfo &probe)
 {
   NS_LOG_FUNCTION(this);
-  // std::cout << "At time " << Simulator::Now ().GetSeconds() << "s switch " << m_id << " receive a back probe\n";
+
   m_linkRTT[probe.src][probe.dst] = (Simulator::Now() - m_lastTime).GetTimeStep();
-
-  int64_t delay = m_linkRTT[probe.src][probe.dst];
-
+  
+  int64_t rtt_test = m_linkRTT[probe.src][probe.dst];
   // get rtt of the last switch
   if (probe.src != m_id) {
-    int64_t rtt_src = -1;
+    int64_t last_rtt = -1;
     for (std::map<uint16_t, std::map<uint16_t, int64_t> >::iterator it = m_linkRTT.begin(); it != m_linkRTT.end(); ++it) {
-      for (std::map<uint16_t, int64_t>::iterator i = it->second.begin(); i != it->second.end(); ++i) {
-        if (i->first == probe.src) {
-          rtt_src = i->second;
+      for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); ++iter) {
+        if (iter->first == probe.src) {
+          last_rtt = iter->second;
           break;
         }
       }
     }
-    if (rtt_src == -1) return;
-    delay -= rtt_src;
+    if (last_rtt == -1) return;
+    rtt_test -= last_rtt;
+  }
+
+  if (probe.src == 6 && probe.dst == 0) {
+    std::cout << "At time " << Simulator::Now().GetSeconds() << "s, " << probe.src << "--->" << probe.dst << ": "
+              << Time(probe.rtt).GetMilliSeconds() << " " << Time(rtt_test).GetMilliSeconds() << std::endl;
   }
 
   ofpbuf *buffer;
   probe_report_info *pri = (probe_report_info*)MakeOpenflowReply (sizeof *pri, OFPT_HELLO, &buffer);
   pri->src = probe.src;
   pri->dst = probe.dst;
-  pri->delay = delay / 2;
+  pri->rtt = rtt_test;
+  pri->rtt_real = probe.rtt;
 
   SendOpenflowBuffer(buffer);
 }
@@ -311,7 +339,7 @@ OpenFlowSwitchNetDevice::DoDispose ()
 
   // wangxing added
   // std::cout << "swicth " << m_id << ":\n";
-  // for (std::map<uint16_t, std::map<uint16_t, int64_t> >::iterator it = m_linkRTT.begin(); it != m_linkRTT.end(); ++it) {
+  // for (Delay_t::iterator it = m_linkRTT.begin(); it != m_linkRTT.end(); ++it) {
   //   for (std::map<uint16_t, int64_t>::iterator i = it->second.begin(); i != it->second.end(); ++i) {
   //     Time rtt = TimeStep(i->second);
   //     std::cout << "<" << it->first << "," << i->first << ">: " << rtt.GetMicroSeconds() << "\n";
@@ -1155,6 +1183,28 @@ OpenFlowSwitchNetDevice::SendErrorMsg (uint16_t type, uint16_t code, const void 
 void
 OpenFlowSwitchNetDevice::FlowTableLookup (sw_flow_key key, ofpbuf* buffer, uint32_t packet_uid, int port, bool send_to_controller)
 {
+  if (0) {
+    Mac48Address mac_src, mac_dst;
+    mac_src.CopyFrom(key.flow.dl_src);
+    mac_dst.CopyFrom(key.flow.dl_dst);
+    std::cout << "wildcards " << key.wildcards << std::endl;
+    std::cout << "in_port " << ntohs(key.flow.in_port) << std::endl;
+    std::cout << "dl_vlan " << ntohs(key.flow.dl_vlan) << std::endl;
+    std::cout << "dl_type " << ntohs(key.flow.dl_type) << std::endl;
+    std::cout << "mac_src " << mac_src << std::endl;
+    std::cout << "mac_dst " << mac_dst << std::endl;
+    std::cout << "nw_proto " << (int)key.flow.nw_proto << std::endl;
+    std::cout << "nw_src " << Ipv4Address(ntohl(key.flow.nw_src)) << std::endl;
+    std::cout << "nw_dst " << Ipv4Address(ntohl(key.flow.nw_dst)) << std::endl;
+    std::cout << "tp_src " << ntohs(key.flow.tp_src) << std::endl;
+    std::cout << "tp_dst " << ntohs(key.flow.tp_dst) << std::endl;
+    std::cout << "mpls_label1 " << ntohl(key.flow.mpls_label1) << std::endl;
+    std::cout << "mpls_label1 " << ntohl(key.flow.mpls_label2) << std::endl;
+    std::cout << "nw_src_mask " << key.nw_src_mask << std::endl;
+    std::cout << "nw_dst_mask " << key.nw_dst_mask << std::endl;
+    std::cout << std::endl;
+  }
+
   sw_flow *flow = chain_lookup (m_chain, &key);
   if (flow != 0)
     {
@@ -1192,6 +1242,14 @@ OpenFlowSwitchNetDevice::RunThroughFlowTable (uint32_t packet_uid, int port, boo
       ofpbuf_delete (buffer);
       return;
     }
+
+  /*************wangxing added****************/
+  key.flow.tp_src = htons(-1);
+  key.flow.tp_dst = htons(-1);
+  key.flow.nw_proto = -1;
+  // key.nw_src_mask = 0;
+  // key.nw_dst_mask = 0;
+  /*************wangxing added****************/
 
   // drop MPLS packets with TTL 1
   if (buffer->l2_5)
@@ -1441,6 +1499,31 @@ OpenFlowSwitchNetDevice::AddFlow (const ofp_flow_mod *ofm)
     }
 
   flow_extract_match (&flow->key, &ofm->match);
+
+  /*****************wangxing added*******************/
+  flow->key.wildcards = 0;
+  flow->key.flow.tp_src = -1;
+  flow->key.flow.tp_dst = -1;
+  /*****************wangxing added*******************/
+  if (00) {
+    Mac48Address mac_src, mac_dst;
+    mac_src.CopyFrom(flow->key.flow.dl_src);
+    mac_dst.CopyFrom(flow->key.flow.dl_dst);
+    std::cout << "wildcards " << flow->key.wildcards << std::endl;
+    std::cout << "in_port " << ntohs(flow->key.flow.in_port) << std::endl;
+    std::cout << "dl_vlan " << ntohs(flow->key.flow.dl_vlan) << std::endl;
+    std::cout << "dl_type " << ntohs(flow->key.flow.dl_type) << std::endl;
+    std::cout << "mac_src " << mac_src << std::endl;
+    std::cout << "mac_dst " << mac_dst << std::endl;
+    std::cout << "nw_proto " << (int)flow->key.flow.nw_proto << std::endl;
+    std::cout << "nw_src " << Ipv4Address(ntohl(flow->key.flow.nw_src)) << std::endl;
+    std::cout << "nw_dst " << Ipv4Address(ntohl(flow->key.flow.nw_dst)) << std::endl;
+    std::cout << "tp_src " << ntohs(flow->key.flow.tp_src) << std::endl;
+    std::cout <<  "tp_dst " << ntohs(flow->key.flow.tp_dst) << std::endl;
+    std::cout << "mpls_label1 " << ntohl(flow->key.flow.mpls_label1) << std::endl;
+    std::cout << "mpls_label2 " << ntohl(flow->key.flow.mpls_label2) << std::endl;
+    std::cout << std::endl;
+  }
 
   uint16_t v_code = ofi::ValidateActions (&flow->key, ofm->actions, actions_len);
   if (v_code != ACT_VALIDATION_OK)
