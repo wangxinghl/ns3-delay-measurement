@@ -101,8 +101,6 @@ private:
     uint16_t monitor;
     uint16_t src;
     uint16_t dst;
-    int64_t time;
-    int64_t rtt;
   };
 
   struct ProbeKey
@@ -132,7 +130,7 @@ private:
   typedef std::map<ProbeKey, std::vector<uint16_t> > ProbeChain;
   ProbeChain m_probe_chain; // map<ProbeKey, vecto<out_port> >
 
-  Delay_t m_linkRTT;
+  Rtt_t m_linkRTT;
 
 /************************wangxing added************************/
 

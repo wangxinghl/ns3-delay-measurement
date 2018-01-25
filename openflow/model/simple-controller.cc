@@ -31,18 +31,15 @@ SimpleController::~SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
 
-  for (Delay_t::iterator it = m_delay.begin(); it != m_delay.end(); ++it) {
+  for (Rtt_t::iterator it = m_rtt.begin(); it != m_rtt.end(); ++it) {
     for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
-      Time delay(iter->second);
-      Time delay_real(m_delayReal[it->first][iter->first]);
-      std::cout << "<" << it->first << "," << iter->first << "> "
-                << delay_real.GetMilliSeconds() << " " << delay.GetMilliSeconds() << "\n";
+      std::cout << "<" << it->first << "," << iter->first << "> " << Time(iter->second).GetMilliSeconds() << "\n";
     }
   }
 
   m_swtches.clear();
   m_solution.clear();
-  m_delay.clear();
+  m_rtt.clear();
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
@@ -180,7 +177,6 @@ void SimpleController::SetFlowEntry(void)
       it->second = temp;
     }
     SendProbeFlow(it->first - m_topo->m_numHost, flows);
-    break;
   }
 }
 
@@ -247,14 +243,10 @@ void SimpleController::ReceiveDelay(ofpbuf* buffer)
   NS_LOG_FUNCTION(this);
   
   probe_report_info *pci = (probe_report_info*)ofpbuf_try_pull(buffer, sizeof(probe_report_info));
-  if (pci->src < pci->dst){
-    m_delay[pci->src][pci->dst] = pci->rtt;
-    m_delayReal[pci->src][pci->dst] = pci->rtt_real;
-  }
-  else{
-    m_delay[pci->dst][pci->src] = pci->rtt;
-    m_delayReal[pci->dst][pci->src] = pci->rtt_real;
-  }
+  if (pci->src < pci->dst)
+    m_rtt[pci->src][pci->dst] = pci->rtt;
+  else
+    m_rtt[pci->dst][pci->src] = pci->rtt;
 }
 
 void SimpleController::ReceivePacketIn(ofpbuf* buffer)

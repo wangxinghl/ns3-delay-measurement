@@ -43,8 +43,7 @@ private:
 
   std::map<uint16_t, std::set<uint16_t> > m_solution;
 
-  Delay_t m_delay; // vector<src, vector<dst, delay> >
-  Delay_t m_delayReal; // vector<src, vector<dst, delay> >
+  Rtt_t m_rtt; // vector<src, vector<dst, delay> >
 };
 
 }	// namespace ns3
