@@ -145,8 +145,8 @@ Path_t Topology::Dijkstra (uint16_t src, uint16_t dst)
     parent[i] = -1;
     visit[i] = false;
   }
+  
   dist[src] = 0;
-
   // Dijkstra
   for (int i = 0; i < m_numSw + m_numHost; ++i) {
     int k = -1;

@@ -11,6 +11,8 @@
 
 namespace ns3 {
 
+const int K = 3;
+
 /**
  * The definition of edge.
  */

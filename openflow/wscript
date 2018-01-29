@@ -176,7 +176,7 @@ def build(bld):
         obj.source.append('model/topology.cc')
         obj.source.append('model/simple-controller.cc')
         obj.source.append('model/max-flow.cc')
-
+        obj.source.append('model/ksp-yen.cc')
 
         obj.env.append_value('DEFINES', 'NS3_OPENFLOW')
         obj_test.source.append('test/openflow-switch-test-suite.cc')
@@ -187,6 +187,7 @@ def build(bld):
         headers.source.append('model/topology.h')
         headers.source.append('model/simple-controller.h')
         headers.source.append('model/max-flow.h')
+        headers.source.append('model/ksp-yen.h')
 
 
     if bld.env['ENABLE_EXAMPLES'] and bld.env['ENABLE_OPENFLOW']:

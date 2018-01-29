@@ -5,6 +5,7 @@
 
 #include "ns3/log.h"
 #include "max-flow.h"
+#include "ksp-yen.h"
 #include "simple-controller.h"
 
 namespace ns3 {
@@ -31,15 +32,17 @@ SimpleController::~SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
 
-  for (Rtt_t::iterator it = m_rtt.begin(); it != m_rtt.end(); ++it) {
-    for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
-      std::cout << "<" << it->first << "," << iter->first << "> " << Time(iter->second).GetMilliSeconds() << "\n";
-    }
-  }
+  // for (Rtt_t::iterator it = m_rtt.begin(); it != m_rtt.end(); ++it) {
+  //   for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
+  //     std::cout << "<" << it->first << "," << iter->first << "> " << Time(iter->second).GetMilliSeconds() << "\n";
+  //   }
+  // }
 
   m_swtches.clear();
   m_solution.clear();
   m_rtt.clear();
+
+  delete_2_array<Paths_t> (m_topo->m_numHost, m_allPaths);
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
@@ -48,14 +51,29 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
 	m_topo = topo;
 
   // max-flow calculate
-  MaxFlow maxflow;
-  maxflow.Calculate(topo, 2, 5);
-  maxflow.Solution(m_solution);
-  // maxflow.ShowSolution();
+  // MaxFlow maxflow;
+  // maxflow.Calculate(topo, 2, 5);
+  // maxflow.Solution(m_solution);
+  // // maxflow.ShowSolution();
+  // SetProbeFlowEntry();
 
-  SetFlowEntry();
+  // SetDataFlowEntry();
 
-  SetDataFlowEntry();
+  m_allPaths = alloc_2_array<Paths_t> (topo->m_numHost, topo->m_numHost);
+  KSPYen kspYen(topo, 3);
+  kspYen.LoadKPaths(m_allPaths);
+  for (uint16_t i = 0; i < topo->m_numHost; ++i) {
+    for (uint16_t j = 0; j < topo->m_numHost; ++j) {
+      std::cout << "host " << i << "--->" << j << ":";
+      for (uint16_t k = 0; k < m_allPaths[i][j].size(); ++k) {
+        std::cout << " (" << k << ") ";
+        for (uint16_t kk = m_allPaths[i][j][k].size() - 1; kk > 0; --kk) {
+          std::cout << m_topo->m_edges[m_allPaths[i][j][k][kk]].dst << " ";
+        }
+      }
+      std::cout << std::endl;
+    }
+  }
 }
 
 void SimpleController::AddSwitch (Ptr<OpenFlowSwitchNetDevice> swtch)
@@ -141,7 +159,7 @@ void SimpleController::SetDataFlowEntry(void)
   }
 }
 
-void SimpleController::SetFlowEntry(void)
+void SimpleController::SetProbeFlowEntry(void)
 {
   NS_LOG_FUNCTION(this);
 

@@ -28,7 +28,7 @@ public:
 
 private:
   void SetDataFlowEntry(void);
-  void SetFlowEntry(void);
+  void SetProbeFlowEntry(void);
   
   void InstallMonitor(uint16_t node);
   void SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows);
@@ -44,6 +44,8 @@ private:
   std::map<uint16_t, std::set<uint16_t> > m_solution;
 
   Rtt_t m_rtt; // vector<src, vector<dst, delay> >
+
+  Paths_t **m_allPaths;     //!< Pointer to all the alternative paths that LoadBalance module generates;
 };
 
 }	// namespace ns3
