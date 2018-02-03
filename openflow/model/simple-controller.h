@@ -28,24 +28,34 @@ public:
 
 private:
   void SetDataFlowEntry(void);
-  void SetProbeFlowEntry(void);
+  void SetProbeFlowEntry(std::map<uint16_t, std::set<uint16_t> > &solution);
   
   void InstallMonitor(uint16_t node);
   void SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows);
 
+  void ReceiveHello(ofpbuf* buffer);
+  void ReceiveUtilization(ofpbuf* buffer);
   void ReceiveDelay(ofpbuf* buffer);
+
 	void ReceivePacketIn(ofpbuf* buffer);
 	void ReceivePortStatus(ofpbuf* buffer);
 
+  void OutputFile(void);
+
 	Ptr<Topology> m_topo;
+  uint64_t m_bandWidth;
 
   std::vector<Ptr<OpenFlowSwitchNetDevice> > m_swtches;
 
-  std::map<uint16_t, std::set<uint16_t> > m_solution;
+  Paths_t **m_allPaths;
 
-  Rtt_t m_rtt; // vector<src, vector<dst, delay> >
+  std::vector<int64_t> m_rtt;
+  std::ofstream m_rtt_file;
 
-  Paths_t **m_allPaths;     //!< Pointer to all the alternative paths that LoadBalance module generates;
+  std::vector<float> m_utilization;
+  std::ofstream m_utilization_file;
+
+  std::vector<uint16_t> m_numLeftTcam;
 };
 
 }	// namespace ns3

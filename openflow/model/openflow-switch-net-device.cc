@@ -32,6 +32,12 @@ void OpenFlowSwitchNetDevice::SetSimuTime(Time simuTime)
 {
   NS_LOG_FUNCTION(this);
   m_simuTime = simuTime;
+
+  for (uint16_t i = 0; i < m_ports.size(); ++i) {
+    m_portsRcvBytes.push_back(0);
+    m_portsSendBytes.push_back(0);
+  }
+  Simulator::Schedule (UTILIZATION_PERIOD, &OpenFlowSwitchNetDevice::ReportUtilization, this);
 }
 
 int OpenFlowSwitchNetDevice::ReceiveHello (const void *msg)
@@ -44,8 +50,7 @@ int OpenFlowSwitchNetDevice::ReceiveHello (const void *msg)
     case PROBE_MONITOR: {
       NS_LOG_WARN("install monitor on switch " << m_id);
       NS_ASSERT(pci->monitor == m_id);
-      m_probePeriod = TimeStep(pci->period);
-      Simulator::Schedule (m_probePeriod, &OpenFlowSwitchNetDevice::SendProbe, this);
+      Simulator::Schedule (PROBE_PERIOD, &OpenFlowSwitchNetDevice::SendProbe, this);
       break;
     }
     case PROBE_FLOW: {
@@ -86,16 +91,21 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
   std::vector<uint16_t>& out_ports = m_probe_chain[key];
   for (uint16_t i = 0; i < out_ports.size(); ++i) {
     ofi::Port& p = m_ports[out_ports[i]];
-    if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048))
+    if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048)) {
+      p.tx_packets++;
+      p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe succeed " << out_ports[i]);
-    else
+    }
+    else {
+      p.tx_dropped++;
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe failed " << out_ports[i]);
+    }
   }
 
   m_lastTime = Simulator::Now ();
 
-  if (Simulator::Now() + m_probePeriod < m_simuTime)
-    Simulator::Schedule (m_probePeriod, &OpenFlowSwitchNetDevice::SendProbe, this);
+  if (Simulator::Now() + PROBE_PERIOD < m_simuTime)
+    Simulator::Schedule (PROBE_PERIOD, &OpenFlowSwitchNetDevice::SendProbe, this);
 }
 
 void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t in_port)
@@ -120,10 +130,15 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
   if (probe.flag) {   // for back probe, flag == 1
     NS_ASSERT(it != m_probe_chain.end());
     ofi::Port& p = m_ports[it->second[0]];
-    if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048))
+    if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048)) {
+      p.tx_packets++;
+      p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond back probe succeed " << it->second[0]);
-    else
+    }
+    else {
+      p.tx_dropped++;
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond back probe failed " << it->second[0]);
+    }
   }
   else {    // for forward probe, flag == 0
     Ptr<Packet> pkt;
@@ -135,10 +150,15 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
     pkt = Create<Packet>(reinterpret_cast<uint8_t*>(&probe), sizeof(ProbeInfo));
     pkt->AddPacketTag (probeTag);
     ofi::Port& p = m_ports[in_port];  // send the back probe through out_port
-    if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048))
+    if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048)) {
+      p.tx_packets++;
+      p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send back probe succeed " << in_port);
-    else
+    }
+    else {
+      p.tx_dropped++;
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send back probe failed " << in_port);
+    }
 
     // transpond forward probe
     if (it != m_probe_chain.end()) {    // the result may be empty, note that the forward probe needn't to transpond
@@ -148,10 +168,15 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
       pkt->AddPacketTag (probeTag);
       for (uint16_t i = 0; i < it->second.size(); ++i) {
         ofi::Port& p = m_ports[it->second[i]];
-        if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048))
+        if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048)) {
+          p.tx_packets++;
+          p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
           NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond forward probe succeed " << it->second[i]);
-        else
+        }
+        else {
+          p.tx_dropped++;
           NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond forward probe failed " << it->second[i]);
+        }
       }
     }
   }
@@ -185,12 +210,36 @@ void OpenFlowSwitchNetDevice::HandleProbe(ProbeInfo &probe)
   // }
 
   ofpbuf *buffer;
-  probe_report_info *pri = (probe_report_info*)MakeOpenflowReply (sizeof *pri, OFPT_HELLO, &buffer);
+  probe_report_info *pri = (probe_report_info*)make_openflow_xid (sizeof *pri, OFPT_HELLO, 2, &buffer);
   pri->src = probe.src;
   pri->dst = probe.dst;
   pri->rtt = rtt;
 
   SendOpenflowBuffer(buffer);
+  free (buffer);
+}
+
+void OpenFlowSwitchNetDevice::ReportUtilization(void)
+{
+  NS_LOG_FUNCTION(this);
+
+  uint16_t n = m_ports.size();
+  uint16_t len = sizeof(utilization_report_info) + sizeof(uint64_t) * n;
+
+  ofpbuf *buffer;
+  utilization_report_info* uri = (utilization_report_info*)make_openflow_xid (len, OFPT_HELLO, 1, &buffer);
+  uri->sw = m_id;
+  for (uint16_t i = 0; i < n; ++i) {
+    uri->data[i] = (m_ports[i].rx_bytes - m_portsRcvBytes[i]) + (m_ports[i].tx_bytes - m_portsSendBytes[i]);
+    m_portsRcvBytes[i] = m_ports[i].rx_bytes;
+    m_portsSendBytes[i] = m_ports[i].tx_bytes;
+  }
+
+  SendOpenflowBuffer(buffer);
+  free (buffer);
+
+  if (Simulator::Now() + UTILIZATION_PERIOD < m_simuTime)
+    Simulator::Schedule (UTILIZATION_PERIOD, &OpenFlowSwitchNetDevice::ReportUtilization, this);
 }
 
 /************************wangxing added************************/
@@ -284,7 +333,6 @@ OpenFlowSwitchNetDevice::OpenFlowSwitchNetDevice ()
 
   // wangxing added
   m_probeId = 0;
-  m_probePeriod = TimeStep(0);
   m_simuTime = TimeStep(0);
   m_lastTime = TimeStep(0);
 }
@@ -828,6 +876,8 @@ OpenFlowSwitchNetDevice::ReceiveFromDevice (Ptr<NetDevice> netdev, Ptr<const Pac
                   /***************wangxing added***************/
                   ProbeTag probeTag;
                   if (packet->PeekPacketTag (probeTag)) {   // Check whether it's probe packet
+                    m_ports[i].rx_packets++;
+                    m_ports[i].rx_bytes += packet->GetSize() + 18;
                     TranspondProbe(packet, i);
                     return;
                   }
@@ -838,7 +888,8 @@ OpenFlowSwitchNetDevice::ReceiveFromDevice (Ptr<NetDevice> netdev, Ptr<const Pac
 
                   ofpbuf *buffer = BufferFromPacket (data.packet,src,dst,netdev->GetMtu (),protocol);
                   m_ports[i].rx_packets++;
-                  m_ports[i].rx_bytes += buffer->size;
+                  // m_ports[i].rx_bytes += buffer->size;
+                  m_ports[i].rx_bytes += packet->GetSize() + 18;  // wangxing modified, EthernetHeader: 18
                   data.buffer = buffer;
                   uint32_t packet_uid = save_buffer (buffer);
 
@@ -933,12 +984,13 @@ OpenFlowSwitchNetDevice::OutputPacket (uint32_t packet_uid, int out_port)
       if (p.netdev != 0 && !(p.config & OFPPC_PORT_DOWN))
         {
           ofi::SwitchPacketMetadata data = m_packetData.find (packet_uid)->second;
-          size_t bufsize = data.buffer->size;
+          // size_t bufsize = data.buffer->size;    // wangxing deleted
           NS_LOG_INFO ("Sending packet " << data.packet->GetUid () << " over port " << out_port);
           if (p.netdev->SendFrom (data.packet->Copy (), data.src, data.dst, data.protocolNumber))
             {
               p.tx_packets++;
-              p.tx_bytes += bufsize;
+              // p.tx_bytes += bufsize;
+              p.tx_bytes += data.packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
             }
           else
             {

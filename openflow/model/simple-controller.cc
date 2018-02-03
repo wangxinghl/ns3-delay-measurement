@@ -5,7 +5,7 @@
 
 #include "ns3/log.h"
 #include "max-flow.h"
-#include "ksp-yen.h"
+#include "YenTopKShortestPathsAlg.h"
 #include "simple-controller.h"
 
 namespace ns3 {
@@ -26,79 +26,127 @@ TypeId SimpleController::GetTypeId (void)
 SimpleController::SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
+
+  m_rtt_file.open("scratch/rtt.txt");
+  m_utilization_file.open("scratch/utilization.txt");
+  Simulator::Schedule (OUTPUT_FILE_PERIOD, &SimpleController::OutputFile, this);
 }
 
 SimpleController::~SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
 
-  // for (Rtt_t::iterator it = m_rtt.begin(); it != m_rtt.end(); ++it) {
-  //   for (std::map<uint16_t, int64_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
-  //     std::cout << "<" << it->first << "," << iter->first << "> " << Time(iter->second).GetMilliSeconds() << "\n";
-  //   }
-  // }
-
   m_swtches.clear();
-  m_solution.clear();
   m_rtt.clear();
+  m_utilization.clear();
+  m_numLeftTcam.clear();
 
-  delete_2_array<Paths_t> (m_topo->m_numHost, m_allPaths);
+  m_rtt_file.close();
+  m_utilization_file.close();
+
+  delete_2_array<Paths_t>(m_topo->m_numHost, m_allPaths);
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
 {
 	NS_LOG_FUNCTION(this);
 	m_topo = topo;
+  m_bandWidth = topo->GetBandwidth();
 
-  // max-flow calculate
-  // MaxFlow maxflow;
-  // maxflow.Calculate(topo, 2, 5);
-  // maxflow.Solution(m_solution);
-  // // maxflow.ShowSolution();
-  // SetProbeFlowEntry();
+  uint16_t numEdge = topo->GetSwitchEdgeNum();
+  for (uint16_t i = 0; i < numEdge; ++i) {
+    m_rtt.push_back(0);
+  }
 
-  // SetDataFlowEntry();
+  m_utilization.resize(topo->m_edges.size() / 2);
+  
+  for (uint16_t i = 0; i < topo->m_numSw; ++i) {
+    m_numLeftTcam.push_back(100);
+  }
 
-  m_allPaths = alloc_2_array<Paths_t> (topo->m_numHost, topo->m_numHost);
-  KSPYen kspYen(topo, 3);
-  kspYen.LoadKPaths(m_allPaths);
+  /*** max-flow calculate ***/
+  MaxFlow maxflow;
+  maxflow.Calculate(topo, 2, 5);    // depth = 2, max = 5;
+  std::map<uint16_t, std::set<uint16_t> > solution;
+  maxflow.Solution(solution);
+  SetProbeFlowEntry(solution);
+  // maxflow.ShowSolution();
+
+  /*** set data flow ***/
+  SetDataFlowEntry();
+
+  /*** calculate K paths ***/
+  std::vector<Edge> &edges = topo->m_edges;
+  m_allPaths = alloc_2_array<Paths_t>(topo->m_numHost, topo->m_numHost);
+  Graph my_graph("scratch/graph.txt");
   for (uint16_t i = 0; i < topo->m_numHost; ++i) {
     for (uint16_t j = 0; j < topo->m_numHost; ++j) {
-      std::cout << "host " << i << "--->" << j << ":";
-      for (uint16_t k = 0; k < m_allPaths[i][j].size(); ++k) {
-        std::cout << " (" << k << ") ";
-        for (uint16_t kk = m_allPaths[i][j][k].size() - 1; kk > 0; --kk) {
-          std::cout << m_topo->m_edges[m_allPaths[i][j][k][kk]].dst << " ";
+      if (i == j)
+        continue;
+
+      YenTopKShortestPathsAlg yenAlg(my_graph, my_graph.get_vertex(i), my_graph.get_vertex(j));
+      uint16_t cnt = 0;
+      uint16_t temp = -1;
+      while(yenAlg.has_next()) {
+        BasePath* base = yenAlg.next();
+        
+        if (temp != base->length()) {
+          temp = base->length();
+          cnt++;
         }
+        if (cnt > 2) break;
+
+        Path_t path;
+        for (int k = 1; k < base->length(); ++k) {
+          uint16_t src = base->GetVertex(k - 1)->getID();
+          uint16_t dst = base->GetVertex(k)->getID();
+          uint16_t edge_id = 0;
+          while(edges[edge_id].src != src || edges[edge_id].dst != dst)
+            edge_id++;
+          path.push_back(edge_id);
+        }
+        m_allPaths[i][j].push_back(path);
       }
-      std::cout << std::endl;
     }
   }
+  // for (uint16_t i = 0; i < topo->m_numHost; ++i) {
+  //   for (uint16_t j = 0; j < topo->m_numHost; ++j) {
+  //     std::cout << "host " << i << "--->" << j << std::endl;
+  //     for (uint16_t k = 0; k < m_allPaths[i][j].size(); ++k) {
+  //       for (uint16_t idx = 0; idx < m_allPaths[i][j][k].size(); ++idx) {
+  //         uint16_t edge = m_allPaths[i][j][k][idx];
+  //         std::cout << "<" << edges[edge].src << "," << edges[edge].dst << ">, ";
+  //       }
+  //       std::cout << std::endl;
+  //     }
+  //   }
+  // }
 }
 
 void SimpleController::AddSwitch (Ptr<OpenFlowSwitchNetDevice> swtch)
 {
 	NS_LOG_FUNCTION(this);
-	if (m_switches.find (swtch) != m_switches.end ()) {
-  		NS_LOG_INFO ("This Controller has already registered this switch!");
-  		return;
-  	}
-
-    m_switches.insert (swtch);
-    m_swtches.push_back(swtch);
+	
+  if (m_switches.find (swtch) != m_switches.end ()) {
+  	NS_LOG_INFO ("This Controller has already registered this switch!");
+  	return;
+  }
+  
+  m_switches.insert (swtch);
+  m_swtches.push_back(swtch);
 }
 
 void SimpleController::ReceiveFromSwitch (Ptr<OpenFlowSwitchNetDevice> swtch, ofpbuf* buffer)
 {
 	if (m_switches.find(swtch) == m_switches.end()) {
-      NS_LOG_ERROR ("Can't receive from this switch, not registered to the Controller.");
-      return;
-    }
+    NS_LOG_ERROR ("Can't receive from this switch, not registered to the Controller.");
+    return;
+  }
 
     uint8_t type = GetPacketType(buffer);
     switch(type) {
       case OFPT_HELLO:
-        ReceiveDelay(buffer);
+        ReceiveHello(buffer);
         break;
     	case OFPT_PACKET_IN:
     		ReceivePacketIn(buffer);
@@ -159,12 +207,12 @@ void SimpleController::SetDataFlowEntry(void)
   }
 }
 
-void SimpleController::SetProbeFlowEntry(void)
+void SimpleController::SetProbeFlowEntry(std::map<uint16_t, std::set<uint16_t> > &solution)
 {
   NS_LOG_FUNCTION(this);
 
   uint8_t edegNum = m_topo->m_edges.size() / 2;
-  for (std::map<uint16_t, std::set<uint16_t> >::iterator it = m_solution.begin(); it != m_solution.end(); it++) {
+  for (std::map<uint16_t, std::set<uint16_t> >::iterator it = solution.begin(); it != solution.end(); it++) {
     std::map<uint16_t, std::vector<uint16_t> > flows;  // map<node, vector<edge> >
     std::set<uint16_t> pre, next, temp;
     pre.insert(it->first);
@@ -211,7 +259,6 @@ void SimpleController::InstallMonitor(uint16_t node)
   
   pci->type = PROBE_MONITOR;
   pci->monitor = node;
-  pci->period = Seconds(1).GetTimeStep();
 
   SendToSwitch(m_swtches[pci->monitor], pci, pci->header.length);
 }
@@ -256,15 +303,70 @@ void SimpleController::SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::v
   }
 }
 
+void SimpleController::ReceiveHello(ofpbuf* buffer)
+{
+  NS_LOG_FUNCTION(this);
+
+  ofp_header *oh = (ofp_header*)ofpbuf_at_assert (buffer, 0, sizeof (ofp_header));
+  switch(oh->xid) {
+    case 0:
+      NS_LOG_WARN("ReceiveHello xid = 0");
+      break;
+    case 1:
+      ReceiveUtilization(buffer);
+      break;
+    case 2:
+      ReceiveDelay(buffer);
+      break;
+    default:
+      NS_LOG_ERROR ("Can't receive this report_info message!" << oh->xid);
+  }
+}
+
+
+void SimpleController::ReceiveUtilization(ofpbuf* buffer)
+{
+  NS_LOG_FUNCTION(this);
+
+  NS_ASSERT(sizeof(utilization_report_info) <= buffer->size);
+  
+  utilization_report_info *uri = (utilization_report_info*)ofpbuf_try_pull(buffer, sizeof(utilization_report_info));
+  uri->sw += m_topo->m_numHost;
+  uint16_t cnt = (uri->header.length - sizeof(utilization_report_info)) / sizeof(uint64_t);
+
+  uint16_t numEdge = m_topo->m_edges.size() / 2;
+  double temp = m_bandWidth / 1000 * UTILIZATION_PERIOD.GetMilliSeconds();
+  for (uint16_t i = 0; i < numEdge; ++i) {
+    Edge &edge =  m_topo->m_edges[i];
+    if (edge.src == uri->sw) {
+      m_utilization[i] = uri->data[edge.spt] * 8 / temp;
+      cnt--;
+    }
+    else if (edge.dst == uri->sw) {
+      m_utilization[i] = uri->data[edge.dpt] * 8 / temp;
+      cnt--;
+    }
+
+    if (cnt == 0) break;
+  }
+}
+
 void SimpleController::ReceiveDelay(ofpbuf* buffer)
 {
   NS_LOG_FUNCTION(this);
-  
+
+  NS_ASSERT(sizeof(probe_report_info) <= buffer->size);
+
+  uint16_t edegNum_Sw = m_topo->GetSwitchEdgeNum();
   probe_report_info *pci = (probe_report_info*)ofpbuf_try_pull(buffer, sizeof(probe_report_info));
-  if (pci->src < pci->dst)
-    m_rtt[pci->src][pci->dst] = pci->rtt;
-  else
-    m_rtt[pci->dst][pci->src] = pci->rtt;
+  for (uint16_t i = 0; i < edegNum_Sw; ++i) {
+    uint16_t src = m_topo->m_edges[i].src - m_topo->m_numHost;
+    uint16_t dst = m_topo->m_edges[i].dst - m_topo->m_numHost;
+    if ((src == pci->src && dst == pci->dst) || (src == pci->dst && dst == pci->src)) {
+      m_rtt[i] = pci->rtt;
+      break;
+    }
+  }
 }
 
 void SimpleController::ReceivePacketIn(ofpbuf* buffer)
@@ -291,6 +393,27 @@ void SimpleController::ReceivePortStatus(ofpbuf* buffer)
 		default:
 			NS_LOG_ERROR ("Can't receive this port status message!");
 	}
+}
+
+void SimpleController::OutputFile(void)
+{
+  NS_LOG_FUNCTION(this);
+
+  // for rtt
+  for (uint16_t i = 0; i < m_rtt.size(); ++i) {
+    m_rtt_file << Time(m_rtt[i]).GetMilliSeconds() << " ";
+  }
+  m_rtt_file << std::endl;
+
+  // for utilization
+  for (uint16_t i = 0; i < m_utilization.size(); ++i) {
+    m_utilization_file << m_utilization[i] << " ";
+  }
+  m_utilization_file << std::endl;
+
+  if (Simulator::Now() + OUTPUT_FILE_PERIOD < m_topo->m_simuTime)
+    Simulator::Schedule (OUTPUT_FILE_PERIOD, &SimpleController::OutputFile, this);
+
 }
 
 }	// namespace ns3

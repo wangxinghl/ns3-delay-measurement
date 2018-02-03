@@ -13,6 +13,13 @@ namespace ns3 {
 
 const int K = 3;
 
+const Time PROBE_PERIOD = Seconds(0.1);
+
+const Time UTILIZATION_PERIOD = Seconds(0.1);
+
+const Time OUTPUT_FILE_PERIOD = Seconds(0.1);
+
+
 /**
  * The definition of edge.
  */
@@ -40,7 +47,6 @@ struct probe_control_info
   uint8_t type;
   uint8_t flag;         // forward: 0; back: 1
   uint16_t monitor;
-  int64_t period;
   uint16_t out_port[0];
 };
 
@@ -52,29 +58,12 @@ struct probe_report_info
   int64_t rtt;
 };
 
-/**
- * The defination of openflow flow entry.
- */
-// struct FlowData
-// {
-//   uint32_t sw_ip;         //!< Switch ipv4 address.
-//   uint16_t command;       //!< Command to the flow entry.
-//   uint16_t in_port;       //!< In port.
-//   uint16_t out_port;      //!< Out port.
-//   uint8_t mac_src[6];     //!< Source mac address.
-//   uint8_t mac_dst[6];     //!< Destination mac address.
-//   uint32_t ip_src;        //!< Source ipv4 address.
-//   uint32_t ip_dst;        //!< Destination ipv4 address.
-//   uint8_t tos;            //!< Tos value.
-// };
-// const size_t FLOW_DATA = sizeof (FlowData);
-
-// struct  NodeTos
-// {
-//   int src;
-//   int dst;
-//   int tos;
-// };
+struct utilization_report_info
+{
+  ofp_header header;
+  uint16_t sw;
+  uint64_t data[0];
+};
 
 /**
  * The definition of path, contains edge id

@@ -89,10 +89,12 @@ class OpenFlowSwitchNetDevice : public NetDevice
 /************************wangxing added************************/
 public:
   void SetSimuTime(Time simuTime);
-  int ReceiveHello (const void *msg);
-  void SendProbe(void);
 
 private:
+  int ReceiveHello (const void *msg);
+  void SendProbe(void);
+  void ReportUtilization(void);
+
   struct ProbeInfo
   {
     uint32_t idx;
@@ -120,17 +122,19 @@ private:
   void TranspondProbe(Ptr<const Packet> packet, uint16_t in_port);
 
   void HandleProbe(ProbeInfo &probe);
-
-  uint32_t m_probeId;
   
   Time m_simuTime;
-  Time m_lastTime;
-  Time m_probePeriod;
 
+  // for probe
+  uint32_t m_probeId;
+  Time m_lastTime;
   typedef std::map<ProbeKey, std::vector<uint16_t> > ProbeChain;
   ProbeChain m_probe_chain; // map<ProbeKey, vecto<out_port> >
-
   Rtt_t m_linkRTT;
+
+  // for utilization
+  std::vector<uint64_t> m_portsRcvBytes;
+  std::vector<uint64_t> m_portsSendBytes;
 
 /************************wangxing added************************/
 

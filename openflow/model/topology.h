@@ -53,6 +53,8 @@ public:
   std::vector<Mac48Address> m_macs;     //!< Mac address of all node.
   std::map<uint16_t, uint32_t> m_ips;   //!< Ipv4 address of all node: <nodeId, ipv4>.
 
+  Time m_simuTime;
+
 private:
   void Init (void);
 

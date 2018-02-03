@@ -54,6 +54,7 @@ void Topology::BuildTopo (const char* file, Time simuTime, std::string bandwidth
 {
   NS_LOG_FUNCTION (this);
 
+  m_simuTime = simuTime;
   m_bps = bandwidth;
 
   // Read topology file
@@ -103,9 +104,11 @@ void Topology::BuildTopo (const char* file, Time simuTime, std::string bandwidth
   CreateAdjacentMatrix();
   control->SetTopology(this);
 
-  // for (size_t i = 0; i < m_ips.size(); ++i) {
-  //   std::cout << Ipv4Address(m_ips[i]) << std::endl;
-  // }
+  std::ofstream fout("scratch/graph.txt");
+  fout << m_numHost + m_numSw << std::endl << std::endl;
+  for (uint16_t i = 0; i < m_edges.size(); ++i)
+    fout << m_edges[i].src << " " << m_edges[i].dst << " 1"<< std::endl;
+  fout.close();
 }
 
 Ptr<Node> Topology::GetNode (uint16_t nodeId)
