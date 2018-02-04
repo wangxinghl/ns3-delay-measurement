@@ -27,8 +27,8 @@ SimpleController::SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
 
-  m_rtt_file.open("scratch/rtt.txt");
-  m_utilization_file.open("scratch/utilization.txt");
+  m_rtt_file.open("scratch/output-file-rtt.txt");
+  m_utilization_file.open("scratch/output-file-utilization.txt");
   Simulator::Schedule (OUTPUT_FILE_PERIOD, &SimpleController::OutputFile, this);
 }
 

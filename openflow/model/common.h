@@ -77,6 +77,18 @@ typedef std::vector<Path_t> Paths_t;
 
 typedef std::map<uint16_t, std::map<uint16_t, int64_t> > Rtt_t;
 
+struct Flow_t
+{
+  uint32_t idx;
+  uint16_t src;
+  uint16_t dst;
+  uint64_t rate;    // data rate
+  uint16_t port;    // the dst port of flow
+  uint16_t size;    // the size of each packet
+  uint32_t total;   // total packet number
+  int64_t interval; // unit: us
+};
+
 /**
  * The templates to allocate or delete one-dimensional array, two-dimensional array and three-dimensional array.
  */
