@@ -530,7 +530,7 @@ void Topology::CreateAdjacentMatrix(void)
     //     std::cout << it->idx;
     //     AdjacentEdge *p = it->firstEdge;
     //     while (p) {
-    //         std::cout << "--->" << p->dst << "(" << p->idx << ")";
+    //         std::cout << "--->" << p->dst;
     //         p = p->next;
     //     }
     //     std::cout << std::endl;

@@ -113,7 +113,7 @@ void MaxFlow::Solution(std::map<uint16_t, std::set<uint16_t> > &solution)
 			p = p->next;
 
 		NS_ASSERT(p != 0);	// p can't be NULL
-		solution[p->dst - m_edgeNum + m_topo->m_numHost].insert(i);
+		solution[p->dst - m_edgeNum].insert(i);
 	}
 }
 

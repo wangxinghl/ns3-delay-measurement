@@ -28,8 +28,9 @@ public:
 
 private:
   void SetDataFlowEntry(void);
-  void SetProbeFlowEntry(std::map<uint16_t, std::set<uint16_t> > &solution);
-  
+  void SetSwitchToHostFlowEntry(void);
+
+  void StartDelayMeasure(std::map<uint16_t, std::set<uint16_t> > &solution);
   void InstallMonitor(uint16_t node);
   void SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows);
 
@@ -46,8 +47,6 @@ private:
   uint64_t m_bandWidth;
 
   std::vector<Ptr<OpenFlowSwitchNetDevice> > m_swtches;
-
-  Paths_t **m_allPaths;
 
   std::vector<int64_t> m_rtt;
   std::ofstream m_rtt_file;

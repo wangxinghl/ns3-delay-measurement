@@ -74,6 +74,8 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
 {
   NS_LOG_FUNCTION(this);
 
+  m_probeSendTime[m_probeId] = Simulator::Now ().GetTimeStep();
+
   ProbeInfo probe;
   probe.idx = m_probeId++;
   probe.flag = 0;
@@ -101,8 +103,6 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe failed " << out_ports[i]);
     }
   }
-
-  m_lastTime = Simulator::Now ();
 
   if (Simulator::Now() + PROBE_PERIOD < m_simuTime)
     Simulator::Schedule (PROBE_PERIOD, &OpenFlowSwitchNetDevice::SendProbe, this);
@@ -186,7 +186,7 @@ void OpenFlowSwitchNetDevice::HandleProbe(ProbeInfo &probe)
 {
   NS_LOG_FUNCTION(this);
 
-  m_linkRTT[probe.src][probe.dst] = (Simulator::Now() - m_lastTime).GetTimeStep();
+  m_linkRTT[probe.src][probe.dst] = Simulator::Now().GetTimeStep() - m_probeSendTime[probe.idx];
   
   int64_t rtt = m_linkRTT[probe.src][probe.dst];
   // get rtt of the last switch
@@ -203,11 +203,6 @@ void OpenFlowSwitchNetDevice::HandleProbe(ProbeInfo &probe)
     if (last_rtt == -1) return;
     rtt -= last_rtt;
   }
-
-  // if (probe.src == 6 && probe.dst == 0) {
-  //   std::cout << "At time " << Simulator::Now().GetSeconds() << "s, " << probe.src << "--->" << probe.dst << ": "
-  //             << Time(probe.rtt).GetMilliSeconds() << " " << Time(rtt_test).GetMilliSeconds() << std::endl;
-  // }
 
   ofpbuf *buffer;
   probe_report_info *pri = (probe_report_info*)make_openflow_xid (sizeof *pri, OFPT_HELLO, 2, &buffer);
@@ -334,7 +329,6 @@ OpenFlowSwitchNetDevice::OpenFlowSwitchNetDevice ()
   // wangxing added
   m_probeId = 0;
   m_simuTime = TimeStep(0);
-  m_lastTime = TimeStep(0);
 }
 
 OpenFlowSwitchNetDevice::~OpenFlowSwitchNetDevice ()
@@ -373,6 +367,7 @@ OpenFlowSwitchNetDevice::DoDispose ()
   // std::cout << "\n";
   m_probe_chain.clear();
   m_linkRTT.clear();
+  m_probeSendTime.clear();
 }
 
 void
@@ -1273,6 +1268,9 @@ OpenFlowSwitchNetDevice::RunThroughFlowTable (uint32_t packet_uid, int port, boo
     }
 
   /*************wangxing added****************/
+  key.flow.in_port = htons(-1);     // in_port = -1
+  Mac48Address("00:00:00:00:00:00").CopyTo(key.flow.dl_src);     // source mac48 = "0.0.0.0.0.0"
+  key.flow.nw_src = htonl(0);
   key.flow.tp_src = htons(-1);
   key.flow.tp_dst = htons(-1);
   key.flow.nw_proto = -1;

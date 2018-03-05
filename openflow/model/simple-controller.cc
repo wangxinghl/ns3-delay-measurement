@@ -36,15 +36,15 @@ SimpleController::~SimpleController ()
 {
 	NS_LOG_FUNCTION(this);
 
-  m_swtches.clear();
-  m_rtt.clear();
-  m_utilization.clear();
-  m_numLeftTcam.clear();
-
   m_rtt_file.close();
   m_utilization_file.close();
 
-  delete_2_array<Paths_t>(m_topo->m_numHost, m_allPaths);
+  m_swtches.clear();
+  
+  m_rtt.clear();
+  m_utilization.clear();
+  
+  m_numLeftTcam.clear();
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
@@ -53,74 +53,41 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
 	m_topo = topo;
   m_bandWidth = topo->GetBandwidth();
 
+  // RTT and utilization
   uint16_t numEdge = topo->GetSwitchEdgeNum();
   for (uint16_t i = 0; i < numEdge; ++i) {
     m_rtt.push_back(0);
   }
-
   m_utilization.resize(topo->m_edges.size() / 2);
   
+  // TCAM number
   for (uint16_t i = 0; i < topo->m_numSw; ++i) {
     m_numLeftTcam.push_back(100);
   }
 
-  /*** max-flow calculate ***/
+  /**
+   * max-flow calculate
+   **/
   MaxFlow maxflow;
-  maxflow.Calculate(topo, 2, 5);    // depth = 2, max = 5;
+  maxflow.Calculate(topo, 2, 8);    // depth = 2, max = 8;
   std::map<uint16_t, std::set<uint16_t> > solution;
   maxflow.Solution(solution);
-  SetProbeFlowEntry(solution);
-  // maxflow.ShowSolution();
-
-  /*** set data flow ***/
-  SetDataFlowEntry();
-
-  /*** calculate K paths ***/
-  std::vector<Edge> &edges = topo->m_edges;
-  m_allPaths = alloc_2_array<Paths_t>(topo->m_numHost, topo->m_numHost);
-  Graph my_graph("scratch/graph.txt");
-  for (uint16_t i = 0; i < topo->m_numHost; ++i) {
-    for (uint16_t j = 0; j < topo->m_numHost; ++j) {
-      if (i == j)
-        continue;
-
-      YenTopKShortestPathsAlg yenAlg(my_graph, my_graph.get_vertex(i), my_graph.get_vertex(j));
-      uint16_t cnt = 0;
-      uint16_t temp = -1;
-      while(yenAlg.has_next()) {
-        BasePath* base = yenAlg.next();
-        
-        if (temp != base->length()) {
-          temp = base->length();
-          cnt++;
-        }
-        if (cnt > 2) break;
-
-        Path_t path;
-        for (int k = 1; k < base->length(); ++k) {
-          uint16_t src = base->GetVertex(k - 1)->getID();
-          uint16_t dst = base->GetVertex(k)->getID();
-          uint16_t edge_id = 0;
-          while(edges[edge_id].src != src || edges[edge_id].dst != dst)
-            edge_id++;
-          path.push_back(edge_id);
-        }
-        m_allPaths[i][j].push_back(path);
-      }
+  // show result
+  for (std::map<uint16_t, std::set<uint16_t> >::iterator iter = solution.begin(); iter != solution.end(); ++iter) {
+    std::cout << "switch " << iter->first << "(" << iter->second.size() << "): ";
+    for (std::set<uint16_t>::iterator it = iter->second.begin(); it != iter->second.end(); ++it) {
+      Edge &edge = topo->m_edges[*it];
+      std::cout << "<" << edge.src << "," << edge.dst << ">, ";
     }
+    std::cout << std::endl;
   }
-  // for (uint16_t i = 0; i < topo->m_numHost; ++i) {
-  //   for (uint16_t j = 0; j < topo->m_numHost; ++j) {
-  //     std::cout << "host " << i << "--->" << j << std::endl;
-  //     for (uint16_t k = 0; k < m_allPaths[i][j].size(); ++k) {
-  //       for (uint16_t idx = 0; idx < m_allPaths[i][j][k].size(); ++idx) {
-  //         uint16_t edge = m_allPaths[i][j][k][idx];
-  //         std::cout << "<" << edges[edge].src << "," << edges[edge].dst << ">, ";
-  //       }
-  //       std::cout << std::endl;
-  //     }
-  //   }
-  // }
+  StartDelayMeasure(solution);
+
+  /**
+   * Set data flow entry
+   **/
+  // SetDataFlowEntry();
+  SetSwitchToHostFlowEntry();
 }
 
 void SimpleController::AddSwitch (Ptr<OpenFlowSwitchNetDevice> swtch)
@@ -166,6 +133,7 @@ void SimpleController::SetDataFlowEntry(void)
   for (uint16_t src = 0; src < m_topo->m_numHost; ++src) {
     for (uint16_t dst = 0; dst < m_topo->m_numHost; ++dst) {
       if (src == dst) continue;
+      
       // Create matching key.
       sw_flow_key key;
       key.wildcards = 0;
@@ -207,15 +175,57 @@ void SimpleController::SetDataFlowEntry(void)
   }
 }
 
-void SimpleController::SetProbeFlowEntry(std::map<uint16_t, std::set<uint16_t> > &solution)
+void SimpleController::SetSwitchToHostFlowEntry(void)
+{
+  NS_LOG_FUNCTION(this);
+
+  for (uint16_t sw = 0; sw < m_topo->m_numSw; ++sw) {
+    for (uint16_t host = 0; host < m_topo->m_numHost; ++host) {
+      // Create matching key.
+      sw_flow_key key;
+      key.wildcards = 0;
+      key.flow.in_port = htons(-1);     // in_port = -1
+      key.flow.dl_vlan = htons(OFP_VLAN_NONE);
+      key.flow.dl_type = htons(ETH_TYPE_IP);
+      Mac48Address("00:00:00:00:00:00").CopyTo(key.flow.dl_src);  // source mac48 = "0.0.0.0.0.0"
+      m_topo->m_macs[host].CopyTo(key.flow.dl_dst);
+      key.flow.nw_proto = -1;
+      key.flow.nw_src = htonl(0);       // source ipv4 = "0.0.0.0"
+      key.flow.nw_dst = htonl(m_topo->m_ips[host]);
+      key.flow.tp_src = htons(-1);
+      key.flow.tp_dst = htons(-1);
+      key.flow.mpls_label1 = htonl (MPLS_INVALID_LABEL);    // For MPLS: Top of label stack
+      key.flow.mpls_label2 = htonl (MPLS_INVALID_LABEL);
+      key.flow.reserved = 0;
+
+      // Create output-to-port action
+      ofp_action_output x[1];
+      x[0].type = htons (OFPAT_OUTPUT);
+      x[0].len = htons (sizeof(ofp_action_output));
+      // x[0].port = out_port;
+
+      Path_t path = m_topo->Dijkstra(sw + m_topo->m_numHost, host);
+      // setup out_port
+      x[0].port = m_topo->m_edges[path.back()].spt;
+
+      // Create a new flow and setup on specified switch
+      ofp_flow_mod* ofm = BuildFlow (key, -1, OFPFC_ADD, x, sizeof(x), OFP_FLOW_PERMANENT, OFP_FLOW_PERMANENT);
+      SendToSwitch (m_swtches[sw], ofm, ofm->header.length);
+    }
+  }
+}
+
+void SimpleController::StartDelayMeasure(std::map<uint16_t, std::set<uint16_t> > &solution)
 {
   NS_LOG_FUNCTION(this);
 
   uint8_t edegNum = m_topo->m_edges.size() / 2;
   for (std::map<uint16_t, std::set<uint16_t> >::iterator it = solution.begin(); it != solution.end(); it++) {
+    
     std::map<uint16_t, std::vector<uint16_t> > flows;  // map<node, vector<edge> >
+    
     std::set<uint16_t> pre, next, temp;
-    pre.insert(it->first);
+    pre.insert(it->first + m_topo->m_numHost);
     temp = it->second;
     while (!temp.empty()) {
       for (std::set<uint16_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
@@ -242,7 +252,10 @@ void SimpleController::SetProbeFlowEntry(std::map<uint16_t, std::set<uint16_t> >
       pre = next;
       it->second = temp;
     }
-    SendProbeFlow(it->first - m_topo->m_numHost, flows);
+
+    InstallMonitor(it->first);
+
+    SendProbeFlow(it->first, flows);
   }
 }
 
@@ -267,7 +280,6 @@ void SimpleController::SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::v
 { 
   NS_LOG_FUNCTION(this);
 
-  InstallMonitor(monitor);
   for (std::map<uint16_t, std::vector<uint16_t> >::iterator it = flows.begin(); it != flows.end() ; ++it) {
     uint16_t  num = it->second.size();
     

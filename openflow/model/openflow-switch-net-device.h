@@ -127,10 +127,12 @@ private:
 
   // for probe
   uint32_t m_probeId;
-  Time m_lastTime;
+  std::map<uint32_t, int64_t> m_probeSendTime;
+
   typedef std::map<ProbeKey, std::vector<uint16_t> > ProbeChain;
   ProbeChain m_probe_chain; // map<ProbeKey, vecto<out_port> >
-  Rtt_t m_linkRTT;
+  
+  Rtt_t m_linkRTT;    // (<src, dst>, rtt)
 
   // for utilization
   std::vector<uint64_t> m_portsRcvBytes;
