@@ -80,7 +80,7 @@ void Topology::BuildTopo (const char* file, Time simuTime, std::string bandwidth
   internet.Install (switchNodes);
 
   // Create a simple controller
-  Ptr<SimpleController> control = Create<SimpleController> ();
+  m_controller = Create<SimpleController> ();
   
   // Install openflow switch net device on switch nodes
   OpenFlowSwitchHelper swtch;
@@ -89,7 +89,7 @@ void Topology::BuildTopo (const char* file, Time simuTime, std::string bandwidth
     NetDeviceContainer ofDevice = swtch.Install (switchNodes.Get (i), switchPorts[i]);  // Install openflow switch net device
     
     Ptr<OpenFlowSwitchNetDevice> opendev = DynamicCast<OpenFlowSwitchNetDevice, NetDevice> (ofDevice.Get (0));
-    opendev->SetController(control);
+    opendev->SetController(m_controller);
     opendev->SetSimuTime(simuTime);
     m_switches.push_back (opendev);  // Collect the pointer to switch
   }
@@ -102,13 +102,12 @@ void Topology::BuildTopo (const char* file, Time simuTime, std::string bandwidth
 
   // Create adjacent matrix
   CreateAdjacentMatrix();
-  control->SetTopology(this);
 
-  std::ofstream fout("scratch/graph.txt");
-  fout << m_numHost + m_numSw << std::endl << std::endl;
-  for (uint16_t i = 0; i < m_edges.size(); ++i)
-    fout << m_edges[i].src << " " << m_edges[i].dst << " 1"<< std::endl;
-  fout.close();
+  // std::ofstream fout("scratch/graph.txt");
+  // fout << m_numHost + m_numSw << std::endl << std::endl;
+  // for (uint16_t i = 0; i < m_edges.size(); ++i)
+  //   fout << m_edges[i].src << " " << m_edges[i].dst << " 1"<< std::endl;
+  // fout.close();
 }
 
 Ptr<Node> Topology::GetNode (uint16_t nodeId)
@@ -180,7 +179,13 @@ Path_t Topology::Dijkstra (uint16_t src, uint16_t dst)
     path.push_back (parent[start]);
     start = m_edges[parent[start]].src;
   }
-  return path;
+
+  uint16_t len = path.size();
+  Path_t temp(len);
+  for (uint16_t i = 0; i < len; ++i) {
+    temp[len-1-i] = path[i];
+  }
+  return temp;
 }
 
 uint16_t Topology::GetSwitchEdgeNum(void)

@@ -13,6 +13,12 @@ namespace ns3 {
 
 const int K = 3;
 
+const double LINK_THRESHOLD = 0.5;
+
+const uint16_t TCAM_MAX = 100;
+
+const Time BANLANCE_PERIOD = Seconds(2);
+
 const Time PROBE_PERIOD = Seconds(0.1);
 
 const Time UTILIZATION_PERIOD = Seconds(0.1);
@@ -84,12 +90,7 @@ struct Flow_t
   uint16_t dst;
   uint16_t port;    // the dst port of flow
   int64_t interval; // unit: us
-  double utili;      // utilization
-
-  uint64_t rate;    // data rate
-  uint32_t total;   // total packet number
-  uint16_t size;    // the size of each packet,size = 1000-8-20-18=954,
-                    // UdpHeader: 8, Ipv4Header: 20, EthernetHeader: 18
+  double utili;     // utilization
 };
 
 /**

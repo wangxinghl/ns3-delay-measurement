@@ -15,6 +15,7 @@
 namespace ns3 {
 
 class Mac48Address;
+class SimpleController;
 
 class Topology : public Object
 {
@@ -49,6 +50,8 @@ public:
   uint16_t m_numSwPOD;     //!< The number of switch in each POD (for 3-layer topology).
 
   std::vector<Edge> m_edges;            //!< The all edge in network.
+
+  Ptr<SimpleController> m_controller;    
   
   std::vector<Mac48Address> m_macs;     //!< Mac address of all node.
   std::map<uint16_t, uint32_t> m_ips;   //!< Ipv4 address of all node: <nodeId, ipv4>.
