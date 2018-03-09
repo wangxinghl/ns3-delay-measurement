@@ -32,11 +32,6 @@ void OpenFlowSwitchNetDevice::SetSimuTime(Time simuTime)
 {
   NS_LOG_FUNCTION(this);
   m_simuTime = simuTime;
-
-  for (uint16_t i = 0; i < m_ports.size(); ++i) {
-    m_portsRcvBytes.push_back(0);
-    m_portsSendBytes.push_back(0);
-  }
   Simulator::Schedule (UTILIZATION_PERIOD, &OpenFlowSwitchNetDevice::ReportUtilization, this);
 }
 
@@ -103,7 +98,7 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe failed " << out_ports[i]);
     }
   }
-
+  
   if (Simulator::Now() + PROBE_PERIOD < m_simuTime)
     Simulator::Schedule (PROBE_PERIOD, &OpenFlowSwitchNetDevice::SendProbe, this);
 }
@@ -225,9 +220,9 @@ void OpenFlowSwitchNetDevice::ReportUtilization(void)
   utilization_report_info* uri = (utilization_report_info*)make_openflow_xid (len, OFPT_HELLO, 1, &buffer);
   uri->sw = m_id;
   for (uint16_t i = 0; i < n; ++i) {
-    uri->data[i] = (m_ports[i].rx_bytes - m_portsRcvBytes[i]) + (m_ports[i].tx_bytes - m_portsSendBytes[i]);
-    m_portsRcvBytes[i] = m_ports[i].rx_bytes;
-    m_portsSendBytes[i] = m_ports[i].tx_bytes;
+    uri->data[i] = m_ports[i].rx_bytes + m_ports[i].tx_bytes;
+    m_ports[i].rx_bytes = 0;
+    m_ports[i].tx_bytes = 0;
   }
 
   SendOpenflowBuffer(buffer);
@@ -357,14 +352,6 @@ OpenFlowSwitchNetDevice::DoDispose ()
   NetDevice::DoDispose ();
 
   // wangxing added
-  // std::cout << "swicth " << m_id << ":\n";
-  // for (Rtt_t::iterator it = m_linkRTT.begin(); it != m_linkRTT.end(); ++it) {
-  //   for (std::map<uint16_t, int64_t>::iterator i = it->second.begin(); i != it->second.end(); ++i) {
-  //     Time rtt = TimeStep(i->second);
-  //     std::cout << "<" << it->first << "," << i->first << ">: " << rtt.GetMicroSeconds() << "\n";
-  //   }
-  // }
-  // std::cout << "\n";
   m_probe_chain.clear();
   m_linkRTT.clear();
   m_probeSendTime.clear();

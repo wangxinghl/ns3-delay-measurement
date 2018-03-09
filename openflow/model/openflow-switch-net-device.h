@@ -134,10 +134,6 @@ private:
   
   Rtt_t m_linkRTT;    // (<src, dst>, rtt)
 
-  // for utilization
-  std::vector<uint64_t> m_portsRcvBytes;
-  std::vector<uint64_t> m_portsSendBytes;
-
 /************************wangxing added************************/
 
 public:

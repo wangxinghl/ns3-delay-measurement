@@ -413,15 +413,22 @@ void SimpleController::OutputFile(void)
 
   // for rtt
   for (uint16_t i = 0; i < m_rtt.size(); ++i) {
-    m_rtt_file << Time(m_rtt[i]).GetMilliSeconds() << " ";
+    m_rtt_file << Time(m_rtt[i]).GetNanoSeconds() << " ";
   }
   m_rtt_file << std::endl;
 
   // for utilization
   for (uint16_t i = 0; i < m_utilization.size(); ++i) {
-    m_utilization_file << m_utilization[i] << " ";
-  }
-  m_utilization_file << std::endl;
+     m_utilization_file << m_utilization[i] << " ";
+   }
+   m_utilization_file << std::endl;
+
+  /* Output average utilization */
+  // double total = 0.0;
+  // for (uint16_t i = 0; i < m_utilization.size(); ++i) {
+  //   total += m_utilization[i];
+  // }
+  // m_utilization_file << total / m_utilization.size() << std::endl;
 
   if (Simulator::Now() + OUTPUT_FILE_PERIOD < m_topo->m_simuTime)
     Simulator::Schedule (OUTPUT_FILE_PERIOD, &SimpleController::OutputFile, this);

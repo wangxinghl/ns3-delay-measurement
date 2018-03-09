@@ -1,4 +1,4 @@
-/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
+ /* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
 /*
  * Copyright (c) 2007, 2014 University of Washington
  *               2015 Universita' degli Studi di Napoli Federico II
@@ -65,6 +65,7 @@ PfifoFastQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
   if (GetNPackets () > m_limit)
     {
       NS_LOG_LOGIC ("Queue disc limit exceeded -- dropping packet");
+      std::cout << "Queue disc limit exceeded -- dropping packet, m_limit = " << m_limit << std::endl;
       Drop (item);
       return false;
     }
@@ -90,6 +91,7 @@ PfifoFastQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
   if (!GetInternalQueue(band)->Enqueue (item))
     {
       NS_LOG_LOGIC ("Enqueue failed -- dropping pkt");
+      std::cout << "Enqueue failed -- dropping pkt" << std::endl;
       Drop (item);
       return false;
     }

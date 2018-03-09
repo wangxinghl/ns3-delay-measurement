@@ -79,14 +79,17 @@ typedef std::map<uint16_t, std::map<uint16_t, int64_t> > Rtt_t;
 
 struct Flow_t
 {
-  uint32_t idx;
+  uint16_t idx;
   uint16_t src;
   uint16_t dst;
-  uint64_t rate;    // data rate
   uint16_t port;    // the dst port of flow
-  uint16_t size;    // the size of each packet
-  uint32_t total;   // total packet number
   int64_t interval; // unit: us
+  double utili;      // utilization
+
+  uint64_t rate;    // data rate
+  uint32_t total;   // total packet number
+  uint16_t size;    // the size of each packet,size = 1000-8-20-18=954,
+                    // UdpHeader: 8, Ipv4Header: 20, EthernetHeader: 18
 };
 
 /**
