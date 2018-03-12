@@ -30,6 +30,7 @@ SimpleController::SimpleController ()
 
   m_rtt_file.open("scratch/output-file-rtt.txt");
   m_utilization_file.open("scratch/output-file-utilization.txt");
+  m_tcam_file.open("scratch/output-file-tcam.txt");
   Simulator::Schedule (OUTPUT_FILE_PERIOD, &SimpleController::OutputFile, this);
 }
 
@@ -44,9 +45,16 @@ SimpleController::~SimpleController ()
   
   m_rtt_file.close();
   m_rtt.clear();
-  
-  m_defaultPath.clear();
+
+  for (uint16_t i = 0; i < m_tcamNum.size(); ++i) {
+    m_tcam_file << m_tcamNum[i] << " ";
+  }
+  m_tcam_file << std::endl;
+  m_tcam_file.close();
   m_tcamNum.clear();
+  
+  m_curPath.clear();
+  m_swPath.clear();
 }
 
 void SimpleController::SetTopology(Ptr<Topology> topo)
@@ -57,15 +65,25 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   m_switchEdgeNum = topo->GetSwitchEdgeNum();
   m_bandWidth = topo->GetBandwidth();
 
-  // RTT and utilization
+  // RTT
   for (uint16_t i = 0; i < m_switchEdgeNum; ++i) {
     m_rtt.push_back(0);
+    m_rtt_file << i << " ";
   }
+  m_rtt_file << std::endl;
+  // utilization
   m_utilization.resize(topo->m_edges.size() / 2);
-  // TCAM
-  for (uint16_t i = 0; i < topo->m_numSw; ++i) {
-    m_tcamNum.push_back(TCAM_MAX);
+  for (uint16_t i = 0; i < m_utilization.size(); ++i) {
+    Edge &edge = topo->m_edges[i];
+    m_utilization_file << "<" << edge.src << "," << edge.dst << "> ";
   }
+  m_utilization_file << std::endl;
+  // TCAM num = host_num + 5
+  for (uint16_t i = 0; i < topo->m_numSw; ++i) {
+    m_tcamNum.push_back(topo->m_numHost + 5);
+    m_tcam_file << i << " ";
+  }
+  m_tcam_file << std::endl;
 
   /**
    * max-flow calculate
@@ -88,12 +106,12 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   /**
    * Set data flow entry
    */
-  // SetDataFlowEntry();
+  // SetFlowEntry();
   SetSwitchToHostFlowEntry();
   for (uint16_t i = 0; i < m_tcamNum.size(); ++i) {
-    std::cout << m_tcamNum[i] << " ";
+    m_tcam_file << m_tcamNum[i] << " ";
   }
-  std::cout << std::endl;
+  m_tcam_file << std::endl;
 
   /**
    * load banlance
@@ -135,49 +153,20 @@ void SimpleController::ReceiveFromSwitch (Ptr<OpenFlowSwitchNetDevice> swtch, of
   }
 }
 
-void SimpleController::SetDataFlowEntry(void)
+void SimpleController::SetFlowEntry(void)
 {
   NS_LOG_FUNCTION(this);
   
   for (uint16_t src = 0; src < m_topo->m_numHost; ++src) {
     for (uint16_t dst = 0; dst < m_topo->m_numHost; ++dst) {
-      if (src == dst) continue;
-      // Create matching key.
-      sw_flow_key key;
-      key.wildcards = 0;
-      // key.flow.in_port = htons();
-      key.flow.dl_vlan = htons(OFP_VLAN_NONE);
-      key.flow.dl_type = htons(ETH_TYPE_IP);
-      m_topo->m_macs[src].CopyTo(key.flow.dl_src);
-      m_topo->m_macs[dst].CopyTo(key.flow.dl_dst);
-      key.flow.nw_proto = -1;
-      key.flow.nw_src = htonl(m_topo->m_ips[src]);
-      key.flow.nw_dst = htonl(m_topo->m_ips[dst]);
-      key.flow.tp_src = htons(-1);
-      key.flow.tp_dst = htons(-1);
-      key.flow.mpls_label1 = htonl (MPLS_INVALID_LABEL);    // For MPLS: Top of label stack
-      key.flow.mpls_label2 = htonl (MPLS_INVALID_LABEL);
-      key.flow.reserved = 0;
+      if (src == dst)
+        continue;
 
-      // Create output-to-port action
-      ofp_action_output x[1];
-      x[0].type = htons (OFPAT_OUTPUT);
-      x[0].len = htons (sizeof(ofp_action_output));
-      // x[0].port = out_port;
-
-      Path_t path = m_topo->Dijkstra(src, dst);
-      uint16_t size = path.size ();
-      for (uint16_t i = 1; i < size; ++i) {
-        // get switch
-        uint16_t sw = m_topo->m_edges[path[i]].src - m_topo->m_numHost;
-        // setup in_port
-        key.flow.in_port = htons(m_topo->m_edges[path[i - 1]].dpt);
-        // setup out_port
-        x[0].port = m_topo->m_edges[path[i]].spt;
-
-        // Create a new flow and setup on specified switch
-        ofp_flow_mod* ofm = BuildFlow (key, -1, OFPFC_ADD, x, sizeof(x), OFP_FLOW_PERMANENT, OFP_FLOW_PERMANENT);
-        SendToSwitch (m_swtches[sw], ofm, ofm->header.length);
+      Path_t path = m_topo->Dijkstra(src, dst);   // get shortest path from src to dst
+      for (uint16_t i = 1; i < path.size (); ++i) {
+        uint16_t sw = m_topo->m_edges[path[i]].src - m_topo->m_numHost;   // get switch
+        uint16_t out_port = m_topo->m_edges[path[i]].spt;   // get out port
+        SendFlowEntry(sw, 0, src, dst, out_port);  // wildcards = 0
       }
     }
   }
@@ -188,39 +177,63 @@ void SimpleController::SetSwitchToHostFlowEntry(void)
   NS_LOG_FUNCTION(this);
 
   for (uint16_t sw = 0; sw < m_topo->m_numSw; ++sw) {
+    std::vector<Path_t> paths;
     for (uint16_t host = 0; host < m_topo->m_numHost; ++host) {
-      // Create matching key.
-      sw_flow_key key;
-      key.wildcards = 0;
-      key.flow.in_port = htons(-1);     // in_port = -1
-      key.flow.dl_vlan = htons(OFP_VLAN_NONE);
-      key.flow.dl_type = htons(ETH_TYPE_IP);
-      Mac48Address("00:00:00:00:00:00").CopyTo(key.flow.dl_src);  // source mac48 = "0.0.0.0.0.0"
-      m_topo->m_macs[host].CopyTo(key.flow.dl_dst);
-      key.flow.nw_proto = -1;
-      key.flow.nw_src = htonl(0);       // source ipv4 = "0.0.0.0"
-      key.flow.nw_dst = htonl(m_topo->m_ips[host]);
-      key.flow.tp_src = htons(-1);
-      key.flow.tp_dst = htons(-1);
-      key.flow.mpls_label1 = htonl (MPLS_INVALID_LABEL);    // For MPLS: Top of label stack
-      key.flow.mpls_label2 = htonl (MPLS_INVALID_LABEL);
-      key.flow.reserved = 0;
-
-      // Create output-to-port action
-      ofp_action_output x[1];
-      x[0].type = htons (OFPAT_OUTPUT);
-      x[0].len = htons (sizeof(ofp_action_output));
-      // x[0].port = out_port;
-
+      // get shortest path from switch to host
       Path_t path = m_topo->Dijkstra(sw + m_topo->m_numHost, host);
-      x[0].port = m_topo->m_edges[path[0]].spt;     // setup out_port
+      paths.push_back(path);
 
-      // Create a new flow and setup on specified switch
-      ofp_flow_mod* ofm = BuildFlow (key, -1, OFPFC_ADD, x, sizeof(x), OFP_FLOW_PERMANENT, OFP_FLOW_PERMANENT);
-      SendToSwitch (m_swtches[sw], ofm, ofm->header.length);
-      m_tcamNum[sw]--;
+      uint32_t wildcards = OFPFW_DL_SRC | OFPFW_NW_SRC_ALL;   // wildcards = OFPFW_DL_SRC | OFPFW_NW_SRC_ALL
+      uint16_t out_port =  m_topo->m_edges[path[0]].spt;    // get out port
+      SendFlowEntry(sw, wildcards, sw + m_topo->m_numHost, host, out_port);
     }
+    m_swPath.push_back(paths);
   }
+}
+
+void SimpleController::FillOutFlowKey(sw_flow_key &key, uint16_t src, uint16_t dst, uint32_t wildcards)
+{
+  NS_LOG_FUNCTION(this);
+
+  key.wildcards = htonl(wildcards);
+  
+  key.flow.in_port = htons(-1);   // ignore, in_port = -1
+  key.flow.dl_vlan = htons(OFP_VLAN_NONE);
+  key.flow.dl_type = htons(ETH_TYPE_IP);
+  // Mac48Address("00:00:00:00:00:00").CopyTo(key.flow.dl_src);  // source mac48 = "0.0.0.0.0.0"
+  m_topo->m_macs[src].CopyTo(key.flow.dl_src);
+  m_topo->m_macs[dst].CopyTo(key.flow.dl_dst);
+  
+  key.flow.nw_proto = -1;   // ignore, nw_proto = -1
+  // key.flow.nw_src = htonl(0);    // source ipv4 = "0.0.0.0"
+  key.flow.nw_src = htonl(m_topo->m_ips[src]);
+  key.flow.nw_dst = htonl(m_topo->m_ips[dst]);
+  key.flow.tp_src = htons(-1);    // ignore, source port = -1
+  key.flow.tp_dst = htons(-1);    // ignore, destination port = -1
+  
+  key.flow.mpls_label1 = htonl (MPLS_INVALID_LABEL);    // For MPLS: Top of label stack
+  key.flow.mpls_label2 = htonl (MPLS_INVALID_LABEL);
+  key.flow.reserved = 0;    // not use
+}
+
+void SimpleController::SendFlowEntry(uint16_t sw, uint32_t wildcards, uint16_t src, uint16_t dst, uint16_t out_port)
+{
+  NS_LOG_FUNCTION(this);
+
+  // Create matching key.
+  sw_flow_key key;
+  FillOutFlowKey(key, src, dst, wildcards);
+
+  // Create output-to-port action
+  ofp_action_output x[1];
+  x[0].type = htons (OFPAT_OUTPUT);
+  x[0].len = htons (sizeof(ofp_action_output));
+  x[0].port = out_port;  // setup out_port
+
+  // Create a new flow and setup on specified switch
+  ofp_flow_mod* ofm = BuildFlow (key, -1, OFPFC_ADD, x, sizeof(x), OFP_FLOW_PERMANENT, OFP_FLOW_PERMANENT);
+  SendToSwitch (m_swtches[sw], ofm, ofm->header.length);
+  m_tcamNum[sw]--;
 }
 
 void SimpleController::StartDelayMeasure(std::map<uint16_t, std::set<uint16_t> > &solution)
@@ -261,7 +274,7 @@ void SimpleController::StartDelayMeasure(std::map<uint16_t, std::set<uint16_t> >
     }
 
     InstallMonitor(it->first);
-    SendProbeFlow(it->first, flows);
+    SendProbeEntry(it->first, flows);
   }
 }
 
@@ -280,7 +293,7 @@ void SimpleController::InstallMonitor(uint16_t node)
   SendToSwitch(m_swtches[pci->monitor], pci, pci->header.length);
 }
 
-void SimpleController::SendProbeFlow(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows)
+void SimpleController::SendProbeEntry(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows)
 { 
   NS_LOG_FUNCTION(this);
 
@@ -347,7 +360,7 @@ void SimpleController::StartLoadBanlance(void)
   // get all default path
   std::vector<Path_t> paths(m_topo->m_numHost);
   for (uint16_t i = 0; i < m_topo->m_numHost; ++i) {
-    m_defaultPath.push_back(paths);
+    m_curPath.push_back(paths);
   }
   for (uint16_t src = 0; src < m_topo->m_numHost; ++src) {
     for (uint16_t dst = 0; dst < m_topo->m_numHost; ++dst) {
@@ -355,22 +368,22 @@ void SimpleController::StartLoadBanlance(void)
       uint16_t cur = src;
       while (cur != dst) {
         Path_t path = m_topo->Dijkstra(cur, dst);        
-        m_defaultPath[src][dst].push_back(path[0]);
+        m_curPath[src][dst].push_back(path[0]);
         cur = m_topo->m_edges[path[0]].dst;  // change current node
       }
     }
   }
-  // for (uint16_t src = 0; src < m_topo->m_numHost; ++src) {
-  //   for (uint16_t dst = 0; dst < m_topo->m_numHost; ++dst) {
-  //     std::cout << "host " << src << "--->" << dst << ": ";
-  //     Path_t &path = m_defaultPath[src][dst];
-  //     for (uint16_t i = 0; i < path.size(); ++i) {
-  //       Edge &edge = m_topo->m_edges[path[i]];
-  //       std::cout << "<" << edge.src << "," << edge.dst << "> ";
-  //     }
-  //     std::cout << std::endl;
-  //   }
-  // }
+  /*for (uint16_t src = 0; src < m_topo->m_numHost; ++src) {
+    for (uint16_t dst = 0; dst < m_topo->m_numHost; ++dst) {
+      std::cout << "host " << src << "--->" << dst << ": ";
+      Path_t &path = m_curPath[src][dst];
+      for (uint16_t i = 0; i < path.size(); ++i) {
+        Edge &edge = m_topo->m_edges[path[i]];
+        std::cout << "<" << edge.src << "," << edge.dst << "> ";
+      }
+      std::cout << std::endl;
+    }
+  }*/
 
   Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculate, this);
 }
@@ -379,25 +392,30 @@ void SimpleController::LoadBanlanceCalculate(void)
 {
   NS_LOG_FUNCTION(this);
 
-  // find the links that more than threshold and sort from large to small
-  std::vector<uint16_t> links = FindAllNotGoodLink();
+  // use copy to calculate
+  m_utilization_copy = m_utilization;
 
-  // handle link from large to small
-  for (uint16_t linkId = 0; linkId < links.size(); ++linkId) {
-    // find all the flows on this link, and sort from large to small
-    uint16_t congestion_link = links[linkId];
-    std::cout << "congestion link <" << m_topo->m_edges[congestion_link].src << "," << m_topo->m_edges[congestion_link].dst << "> " << m_utilization[congestion_link] << std::endl;
-    std::vector<Flow_t> flows = GetAllFlowsOnLink(congestion_link);
-    for (uint16_t i = 0; i < flows.size(); ++i) {
-      std::cout << flows[i].src << "--->"<< flows[i].dst << ": " << flows[i].utili << "\n";
-    }
+  while (1) {
+    std::cout << "#########################################" << std::endl;
+    std::cout << "At time " << Simulator::Now().GetSeconds() << "s load banlance calculate begin" << std::endl;
+    
+    // find links that more than threshold, and sort from large to small
+    std::vector<uint16_t> links = FindAllNotGoodLink();
+    if (links.empty()) break;
+  
+    // handle the link with max utilization
+    std::vector<Flow_t> flows = GetAllFlowsOnLink(links[0]);  // find all the flows on this link, and sort from large to small
 
     // handle flow from large to small
-    for (uint16_t flow_id = 0; flow_id < flows.size(); ++flow_id) {
-      // remove the flow from current path and modify utilization
-      Flow_t &flow = flows[flow_id];
-      std::cout << flow.src << "--->" << flow.dst << " " << flow.utili << std::endl;
-      Path_t &oldPath = m_defaultPath[flow.src][flow.dst];
+    uint16_t idx;
+    for (idx = 0; idx < flows.size(); ++idx) {
+      // flow
+      Flow_t &flow = flows[idx];
+      std::cout << "*******************************" << std::endl;
+      std::cout << "handle the flow: " << flow.src << "--->" << flow.dst << " " << flow.utili << std::endl;
+    
+      // old path
+      Path_t &oldPath = m_curPath[flow.src][flow.dst];
       std::cout << "oldPath: ";
       for (uint16_t i = 0; i < oldPath.size(); ++i) {
         Edge &edge = m_topo->m_edges[oldPath[i]];
@@ -405,31 +423,44 @@ void SimpleController::LoadBanlanceCalculate(void)
       }
       std::cout << std::endl;
 
+      // find a new path
       Path_t newPath = GetNewPathWithoutSomeLink(flow.src, flow.dst, links);
-      if (newPath.empty()) continue;
+      if (newPath.empty()) {
+        std::cout << "Can not find a new path, continue\n";
+        continue;
+      }
+
+      // store origin utilization
+      std::vector<float> utili_origin = m_utilization_copy;
 
       // check link utilization
-      std::vector<float> utili_origin = m_utilization;    // store origin utilization
       if (!UtilizationCheck(oldPath, newPath, flow.utili)) {
-        m_utilization = utili_origin;
-        std::cout << "Utilization Check continue\n";
+        m_utilization_copy = utili_origin;
+        std::cout << "Utilization check failed, continue\n";
         continue;
       }
 
-      // TCAM number
-      if(!TcamCheck(oldPath, newPath)) {
-        std::cout << "tcam Check continue\n";
-        continue;
+      // check TCAM number
+      std::map<uint16_t, uint16_t> sw_port;
+      if(TcamCheck(oldPath, newPath, sw_port)) {
+        m_curPath[flow.src][flow.dst] = newPath;
+        UpdateFlow(flow.src, flow.dst, sw_port);
+        for (uint16_t i = 0; i < m_tcamNum.size(); ++i) {
+          m_tcam_file << m_tcamNum[i] << " ";
+        }
+        m_tcam_file << std::endl;
+        break;
       }
-
-      SendPathFlow(oldPath, newPath, flow);
-      break;
+      else {
+        m_utilization_copy = utili_origin;
+        std::cout << "Tcam check falied, continue\n";
+      }
     }
-    break;
+    if (idx == flows.size())  break;  // have no flow can move
   }
 
-  // if (Simulator::Now() + BANLANCE_PERIOD < m_topo->m_simuTime)
-    // Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculate, this);
+  if (Simulator::Now() + BANLANCE_PERIOD < m_topo->m_simuTime)
+    Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculate, this);
 }
 
 std::vector<uint16_t> SimpleController::FindAllNotGoodLink(void)
@@ -439,17 +470,17 @@ std::vector<uint16_t> SimpleController::FindAllNotGoodLink(void)
   // get all links that more than threshold
   std::vector<uint16_t> links;
   for (uint16_t i = 0; i < m_switchEdgeNum; ++i) {
-    if (m_utilization[i] > LINK_THRESHOLD)
+    if (m_utilization_copy[i] > LINK_THRESHOLD)
       links.push_back(i);
   }
 
   // sort from large to small
   for (uint16_t i = 0; i < links.size(); ++i) {
-    float max = m_utilization[links[i]];
+    float max = m_utilization_copy[links[i]];
     uint16_t index = i;
     for (uint16_t j = i + 1; j < links.size(); ++j) {
-      if (m_utilization[links[j]] > max) {
-        max = m_utilization[links[j]];
+      if (m_utilization_copy[links[j]] > max) {
+        max = m_utilization_copy[links[j]];
         index = j;
       }
     }
@@ -460,7 +491,8 @@ std::vector<uint16_t> SimpleController::FindAllNotGoodLink(void)
 
   // show
   for (uint16_t i = 0; i < links.size(); ++i) {
-    std::cout << "links <" << m_topo->m_edges[links[i]].src << "," << m_topo->m_edges[links[i]].dst << "> " << m_utilization[links[i]] << std::endl;
+    std::cout << "congestion link <" << m_topo->m_edges[links[i]].src << "," 
+              << m_topo->m_edges[links[i]].dst << "> " << m_utilization_copy[links[i]] << std::endl;
   }
   return links;
 }
@@ -474,7 +506,7 @@ std::vector<Flow_t> SimpleController::GetAllFlowsOnLink(uint16_t link)
   std::vector<Flow_t> flows;
   for (uint16_t i = 0; i < m_flows.size(); ++i) {
     Flow_t &flow = m_flows[i];
-    Path_t &path = m_defaultPath[flow.src][flow.dst];
+    Path_t &path = m_curPath[flow.src][flow.dst];
     for (uint16_t j = 1; j < path.size() - 1; ++j) {
       if (path[j] == link || path[j] == link + m_edgeNum) {
         flows.push_back(flow);
@@ -482,6 +514,12 @@ std::vector<Flow_t> SimpleController::GetAllFlowsOnLink(uint16_t link)
     }
   }
   std::sort(flows.begin(), flows.end(), flow_compare);
+
+  // show
+  std::cout << "there are " << flows.size() << " flows on the most congested link\n";
+  for (uint16_t i = 0; i < flows.size(); ++i) {
+    std::cout << flows[i].src << "--->"<< flows[i].dst << ": " << flows[i].utili << "\n";
+  }
   return flows;
 }
 
@@ -516,6 +554,7 @@ Path_t SimpleController::GetNewPathWithoutSomeLink(uint16_t src, uint16_t dst, c
     m_topo->m_edges[links[i] + m_edgeNum].dist = 1;
   }
 
+  // show
   std::cout << "newPath: ";
   for (uint16_t i = 0; i < newPath.size(); ++i) {
     Edge &edge = m_topo->m_edges[newPath[i]];
@@ -533,65 +572,90 @@ bool SimpleController::UtilizationCheck(const Path_t &oldPath, const Path_t &new
   // get max utilization
   double max = 0;
   for (uint16_t i = 0; i < m_switchEdgeNum; ++i) {
-    if (max < m_utilization[i])
-      max = m_utilization[i];
+    if (max < m_utilization_copy[i])
+      max = m_utilization_copy[i];
   }
 
   // for old path
   for (uint16_t i = 1; i < oldPath.size() - 1; ++i) {
     if (oldPath[i] < m_edgeNum)
-      m_utilization[oldPath[i]] -= demand;
+      m_utilization_copy[oldPath[i]] -= demand;
     else
-      m_utilization[oldPath[i] - m_edgeNum] -= demand;
+      m_utilization_copy[oldPath[i] - m_edgeNum] -= demand;
   }
   // for new path
   for (uint16_t i = 1; i < newPath.size() - 1; ++i) {
     if (newPath[i] < m_edgeNum)
-      m_utilization[newPath[i]] += demand;
+      m_utilization_copy[newPath[i]] += demand;
     else
-      m_utilization[newPath[i] - m_edgeNum] += demand;
+      m_utilization_copy[newPath[i] - m_edgeNum] += demand;
   }
 
   // get new max utilization
   double max_new = 0;
   for (uint16_t i = 0; i < m_switchEdgeNum; ++i) {
-    if (max_new < m_utilization[i])
-      max_new = m_utilization[i];
+    if (max_new < m_utilization_copy[i])
+      max_new = m_utilization_copy[i];
+  }
+
+  std::cout << "max new " << max_new << std::endl;
+  for (uint16_t i = 0; i < m_switchEdgeNum; ++i) {
+    if (m_utilization_copy[i] > LINK_THRESHOLD)
+      std::cout << "link <" << m_topo->m_edges[i].src << "," << m_topo->m_edges[i].dst << "> " << m_utilization_copy[i] << std::endl;
   }
 
   return max_new < max;
 }
-
-bool SimpleController::TcamCheck(const Path_t &oldPath, const Path_t &newPath)
+ 
+bool SimpleController::TcamCheck(const Path_t &oldPath, const Path_t &newPath, std::map<uint16_t, uint16_t> &sw_port)
 {
   NS_LOG_FUNCTION(this);
-  
-  std::vector<uint16_t> switchs;;
-  for (uint16_t i = 0; i < newPath.size(); ++i) {  // new path
-    bool flag = false;
-    for (uint16_t j = 0; j < oldPath.size(); ++j) {
-      if (newPath[i] == oldPath[j]) {
-        flag = true;
+
+  std::vector<Edge> &edges = m_topo->m_edges;
+
+  // std::map<uint16_t, uint16_t> sw_port;
+  for (uint16_t i = 1; i < newPath.size(); ++i) {
+    uint16_t sw = edges[newPath[i]].src;
+    
+    // find in old path
+    bool flag = true;
+    for (uint16_t j = 1; j < oldPath.size() - 1; ++j){
+      if (sw == edges[oldPath[j]].src && newPath[i] != oldPath[j]) {
+        sw_port[sw - m_topo->m_numHost] = edges[newPath[i]].spt;
+        flag = false;
         break;
       }
     }
-    if (flag)
-      switchs.push_back(m_topo->m_edges[newPath[i]].src - m_topo->m_numHost);
+
+    // find in switch path
+    if (flag) {
+      Path_t &path = m_swPath[sw - m_topo->m_numHost][edges[oldPath.back()].dst];
+      if (newPath[i] != path[0])
+        sw_port[sw - m_topo->m_numHost] = edges[newPath[i]].spt;
+    }
   }
 
-  
+  std::cout << "switch-out_port: ";
+  for (std::map<uint16_t, uint16_t>::iterator it = sw_port.begin(); it != sw_port.end(); ++it) {
+    std::cout << "(" << it->first << ", " << it->second << ") ";
+  }
+  std::cout << std::endl;
 
-  for (uint16_t i = 0; i < switchs.size(); ++i) {
-    if (m_tcamNum[switchs[i]] == 0)
+  for (std::map<uint16_t, uint16_t>::iterator it = sw_port.begin(); it != sw_port.end(); ++it) {
+    if (m_tcamNum[it->first] < 1)
       return false;
   }
   return true;
 }
 
-void SimpleController::SendPathFlow(const Path_t &oldPath, const Path_t &newPath, const Flow_t &flow)
+void SimpleController::UpdateFlow(uint16_t src, uint16_t dst, std::map<uint16_t, uint16_t> &sw_port)
 {
   NS_LOG_FUNCTION(this);
-  std::cout << "send path flow " << flow.src << "--->" << flow.dst << std::endl;
+
+  for (std::map<uint16_t, uint16_t>::iterator it = sw_port.begin(); it != sw_port.end(); ++it) {
+   std::cout << "send flow(" << src << "--->" << dst << ") entry to switch " << it->first << std::endl;
+    SendFlowEntry(it->first, 0, src, dst, it->second);
+  }
 }
 
 void SimpleController::ReceiveHello(ofpbuf* buffer)
@@ -661,7 +725,7 @@ void SimpleController::ReceiveDelay(ofpbuf* buffer)
 void SimpleController::ReceivePacketIn(ofpbuf* buffer)
 {
 	NS_LOG_FUNCTION(this);
-  std::cout << "ReceivePacketIn\n";
+  NS_LOG_WARN("ReceivePacketIn");
 }
 
 void SimpleController::ReceivePortStatus(ofpbuf* buffer)

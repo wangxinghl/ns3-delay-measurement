@@ -1194,11 +1194,22 @@ OpenFlowSwitchNetDevice::SendErrorMsg (uint16_t type, uint16_t code, const void 
 void
 OpenFlowSwitchNetDevice::FlowTableLookup (sw_flow_key key, ofpbuf* buffer, uint32_t packet_uid, int port, bool send_to_controller)
 {
+  /*************wangxing added****************/
+  // Mac48Address("00:00:00:00:00:00").CopyTo(key.flow.dl_src);     // source mac48 = "0.0.0.0.0.0"
+  // key.flow.nw_src = htonl(0);
+  key.flow.in_port = htons(-1);
+  key.flow.tp_src = htons(-1);
+  key.flow.tp_dst = htons(-1);
+  key.flow.nw_proto = -1;
+  // key.nw_src_mask = -1;
+  // key.nw_dst_mask = -1;
+  /*************wangxing added****************/
+
   if (0) {
     Mac48Address mac_src, mac_dst;
     mac_src.CopyFrom(key.flow.dl_src);
     mac_dst.CopyFrom(key.flow.dl_dst);
-    std::cout << "wildcards " << key.wildcards << std::endl;
+    std::cout << m_id << " wildcards " << key.wildcards << std::endl;
     std::cout << "in_port " << ntohs(key.flow.in_port) << std::endl;
     std::cout << "dl_vlan " << ntohs(key.flow.dl_vlan) << std::endl;
     std::cout << "dl_type " << ntohs(key.flow.dl_type) << std::endl;
@@ -1253,17 +1264,6 @@ OpenFlowSwitchNetDevice::RunThroughFlowTable (uint32_t packet_uid, int port, boo
       ofpbuf_delete (buffer);
       return;
     }
-
-  /*************wangxing added****************/
-  key.flow.in_port = htons(-1);     // in_port = -1
-  Mac48Address("00:00:00:00:00:00").CopyTo(key.flow.dl_src);     // source mac48 = "0.0.0.0.0.0"
-  key.flow.nw_src = htonl(0);
-  key.flow.tp_src = htons(-1);
-  key.flow.tp_dst = htons(-1);
-  key.flow.nw_proto = -1;
-  // key.nw_src_mask = 0;
-  // key.nw_dst_mask = 0;
-  /*************wangxing added****************/
 
   // drop MPLS packets with TTL 1
   if (buffer->l2_5)
@@ -1515,15 +1515,17 @@ OpenFlowSwitchNetDevice::AddFlow (const ofp_flow_mod *ofm)
   flow_extract_match (&flow->key, &ofm->match);
 
   /*****************wangxing added*******************/
-  flow->key.wildcards = 0;
+  flow->key.wildcards &= 0xffff;
   flow->key.flow.tp_src = -1;
   flow->key.flow.tp_dst = -1;
+  // flow->key.nw_src_mask = -1;
+  // flow->key.nw_dst_mask = -1;
   /*****************wangxing added*******************/
-  if (00) {
+  if (0) {
     Mac48Address mac_src, mac_dst;
     mac_src.CopyFrom(flow->key.flow.dl_src);
     mac_dst.CopyFrom(flow->key.flow.dl_dst);
-    std::cout << "wildcards " << flow->key.wildcards << std::endl;
+    std::cout << m_id << " wildcards " << flow->key.wildcards << std::endl;
     std::cout << "in_port " << ntohs(flow->key.flow.in_port) << std::endl;
     std::cout << "dl_vlan " << ntohs(flow->key.flow.dl_vlan) << std::endl;
     std::cout << "dl_type " << ntohs(flow->key.flow.dl_type) << std::endl;
@@ -1536,6 +1538,8 @@ OpenFlowSwitchNetDevice::AddFlow (const ofp_flow_mod *ofm)
     std::cout <<  "tp_dst " << ntohs(flow->key.flow.tp_dst) << std::endl;
     std::cout << "mpls_label1 " << ntohl(flow->key.flow.mpls_label1) << std::endl;
     std::cout << "mpls_label2 " << ntohl(flow->key.flow.mpls_label2) << std::endl;
+    std::cout << "nw_src_mask " << flow->key.nw_src_mask << std::endl;
+    std::cout << "nw_dst_mask " << flow->key.nw_dst_mask << std::endl;
     std::cout << std::endl;
   }
 
@@ -1565,6 +1569,7 @@ OpenFlowSwitchNetDevice::AddFlow (const ofp_flow_mod *ofm)
   int error = chain_insert (m_chain, flow);
   if (error)
     {
+      std::cout << "insert error\n";
       if (error == -ENOBUFS)
         {
           SendErrorMsg (OFPET_FLOW_MOD_FAILED, OFPFMFC_ALL_TABLES_FULL, ofm, ntohs (ofm->header.length));

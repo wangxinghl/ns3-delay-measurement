@@ -15,9 +15,9 @@ const int K = 3;
 
 const double LINK_THRESHOLD = 0.5;
 
-const uint16_t TCAM_MAX = 100;
+const uint16_t TCAM_MAX = 200;
 
-const Time BANLANCE_PERIOD = Seconds(2);
+const Time BANLANCE_PERIOD = Seconds(1);
 
 const Time PROBE_PERIOD = Seconds(0.1);
 
