@@ -81,7 +81,17 @@ typedef std::vector<uint16_t> Path_t;
  */
 typedef std::vector<Path_t> Paths_t;
 
+typedef std::vector<uint16_t> Links_t;
+
 typedef std::map<uint16_t, std::map<uint16_t, int64_t> > Rtt_t;
+
+typedef std::map<uint16_t, std::map<uint16_t, Paths_t> > SR_t;
+
+typedef std::map<uint16_t, Links_t> NodeLink_t;
+
+typedef std::map<uint16_t, uint16_t> SwPort_t;
+
+
 
 struct Flow_t
 {

@@ -229,6 +229,23 @@ std::map<uint16_t, uint16_t> Topology::GetEdgeAdjacentNode(uint16_t edge, uint16
     return result;
 }
 
+void Topology::PrintPath(Path_t &path, const char* s)
+{
+  NS_LOG_FUNCTION(this);
+  std::cout << s;
+  for (uint16_t i = 0; i < path.size(); ++i)
+    std::cout << "<" << m_edges[path[i]].src << "," << m_edges[path[i]].dst << "> ";
+  std::cout << std::endl;
+}
+
+void Topology::PrintPaths(Paths_t &paths, const char* s)
+{
+  NS_LOG_FUNCTION(this);
+  std::cout << s << std::endl;
+  for (uint16_t i = 0; i < paths.size(); ++i)
+    PrintPath(paths[i]);
+}
+
 void Topology::Init (void)
 {
   NS_LOG_FUNCTION (this);

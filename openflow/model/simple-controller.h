@@ -39,14 +39,29 @@ private:
   void SendProbeEntry(uint16_t monitor, std::map<uint16_t, std::vector<uint16_t> > &flows);
 
   // for load banlance
+  /***************************************************/
   void StartLoadBanlance(void);
   void LoadBanlanceCalculate(void);
-  std::vector<uint16_t> FindAllNotGoodLink(void);
+  Links_t FindAllNotGoodLink(void);
+  uint16_t FindLinkWithMaxUtil(void);
   std::vector<Flow_t> GetAllFlowsOnLink(uint16_t link);
-  Path_t GetNewPathWithoutSomeLink(uint16_t src, uint16_t dst, const std::vector<uint16_t> &links);
+
+  // simple shortest path
+  Path_t GetNewPathWithoutSomeLink(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
   bool UtilizationCheck(const Path_t &oldPath, const Path_t &newPath, double demand);
-  bool TcamCheck(const Path_t &oldPath, const Path_t &newPath, std::map<uint16_t, uint16_t> &sw_port);
-  void UpdateFlow(uint16_t src, uint16_t dst, std::map<uint16_t, uint16_t> &sw_port);
+
+  // greedy shortest path
+  Path_t GetNewPathWithoutSomeLinkGreedy(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
+  Paths_t GetKShortestPath(Flow_t &flow, const Links_t &links);
+  Path_t Transform(BasePath* base);
+  
+  // segement routing path
+  Path_t GetNewPathWithoutSomeLinkSR(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
+  Paths_t GetAllNeighbourhoodSolution(Flow_t &flow, const Links_t &links);
+
+  bool TcamCheck(const Path_t &oldPath, const Path_t &newPath, SwPort_t &sw_port);
+  void UpdateFlow(uint16_t src, uint16_t dst, SwPort_t &sw_port);
+  /***************************************************/
 
   // handle receive message
   void ReceiveHello(ofpbuf* buffer);
@@ -57,6 +72,7 @@ private:
 	void ReceivePortStatus(ofpbuf* buffer);
 
   void OutputFile(void);
+  void ShowTimeCost(struct timeval *begin, struct timeval *end);
 
 
   // basic
@@ -67,9 +83,9 @@ private:
   std::vector<Ptr<OpenFlowSwitchNetDevice> > m_swtches;
 
   // for utlization
-  std::vector<float> m_utilization;
-  std::vector<float> m_utilization_copy;
-  std::ofstream m_utilization_file;
+  std::vector<float> m_util;
+  std::vector<float> m_util_copy;
+  std::ofstream m_util_file;
   
   // for RTT
   std::vector<int64_t> m_rtt;
@@ -83,6 +99,9 @@ private:
   std::vector<std::vector<Path_t> > m_curPath;  // m_curPath[host][host]
   std::vector<std::vector<Path_t> > m_swPath;   // m_swPath[switch][host]
 
+  SR_t m_SRPath;     // segement routing path
+  NodeLink_t  m_nodeLink_t;
+  NodeLink_t  m_nodeLink_r;
 };
 
 }	// namespace ns3

@@ -37,6 +37,9 @@ public:
   uint16_t GetSwitchEdgeNum(void);
   std::map<uint16_t, uint16_t> GetEdgeAdjacentNode(uint16_t edge, uint16_t depth);
 
+  void PrintPath(Path_t &path, const char* s = "");
+  void PrintPaths(Paths_t &paths, const char* s = "");
+
   uint16_t m_layer;        //!< The layer number of switch.
   uint16_t m_numSw;        //!< The total number of switch.
   uint16_t m_numHost;      //!< The total number of host, including controller.
