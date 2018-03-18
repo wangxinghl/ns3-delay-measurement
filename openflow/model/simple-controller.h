@@ -48,7 +48,6 @@ private:
 
   // simple shortest path
   Path_t GetNewPathWithoutSomeLink(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
-  bool UtilizationCheck(const Path_t &oldPath, const Path_t &newPath, double demand);
 
   // greedy shortest path
   Path_t GetNewPathWithoutSomeLinkGreedy(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
@@ -59,6 +58,7 @@ private:
   Path_t GetNewPathWithoutSomeLinkSR(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
   Paths_t GetAllNeighbourhoodSolution(Flow_t &flow, const Links_t &links);
 
+  void UpdateUtilWithDemand(const Path_t &path, double demand, bool isIncrease);
   bool TcamCheck(const Path_t &oldPath, const Path_t &newPath, SwPort_t &sw_port);
   void UpdateFlow(uint16_t src, uint16_t dst, SwPort_t &sw_port);
   /***************************************************/

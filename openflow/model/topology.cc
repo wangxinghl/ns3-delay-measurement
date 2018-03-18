@@ -234,7 +234,7 @@ void Topology::PrintPath(Path_t &path, const char* s)
   NS_LOG_FUNCTION(this);
   std::cout << s;
   for (uint16_t i = 0; i < path.size(); ++i)
-    std::cout << "<" << m_edges[path[i]].src << "," << m_edges[path[i]].dst << "> ";
+    std::cout << "<" << m_edges[path[i]].src - m_numHost << "," << m_edges[path[i]].dst - m_numHost << "> ";
   std::cout << std::endl;
 }
 

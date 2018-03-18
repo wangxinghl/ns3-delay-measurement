@@ -11,11 +11,13 @@
 
 namespace ns3 {
 
-const int K = 3;
+const uint16_t GAMA = 5;
+
+const double ALPH = 0.5;
 
 const double LINK_THRESHOLD = 0.5;
 
-const uint16_t TCAM_MAX = 200;
+const uint16_t TCAM_MAX = 10;
 
 const Time BANLANCE_PERIOD = Seconds(1);
 
@@ -100,7 +102,8 @@ struct Flow_t
   uint16_t dst;
   uint16_t port;    // the dst port of flow
   int64_t interval; // unit: us
-  double utili;     // utilization
+  double util;     // utilization
+  bool flag;
 };
 
 /**
