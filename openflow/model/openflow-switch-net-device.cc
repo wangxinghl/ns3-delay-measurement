@@ -90,7 +90,7 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
     ofi::Port& p = m_ports[out_ports[i]];
     if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048)) {
       p.tx_packets++;
-      p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
+      p.tx_bytes += ((packet->GetSize() + 18 < 64) ? 64 : packet->GetSize() + 18);    // min ethernet frame = 64, EthernetHeader: 18
       NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe succeed " << out_ports[i]);
     }
     else {
