@@ -91,11 +91,11 @@ void OpenFlowSwitchNetDevice::SendProbe(void)
     if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048)) {
       p.tx_packets++;
       p.tx_bytes += ((packet->GetSize() + 18 < 64) ? 64 : packet->GetSize() + 18);    // min ethernet frame = 64, EthernetHeader: 18
-      NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe succeed " << out_ports[i]);
+      NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " send probe succeed " << out_ports[i]);
     }
     else {
       p.tx_dropped++;
-      NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send probe failed " << out_ports[i]);
+      NS_ASSERT_MSG(false, "At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " send probe failed " << out_ports[i]);
     }
   }
   
@@ -128,11 +128,11 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
     if (p.netdev->SendFrom (packet->Copy (), GetAddress(), GetAddress(), 2048)) {
       p.tx_packets++;
       p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
-      NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond back probe succeed " << it->second[0]);
+      NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " transpond back probe succeed " << it->second[0]);
     }
     else {
       p.tx_dropped++;
-      NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond back probe failed " << it->second[0]);
+      NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " transpond back probe failed " << it->second[0]);
     }
   }
   else {    // for forward probe, flag == 0
@@ -148,11 +148,11 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
     if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048)) {
       p.tx_packets++;
       p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
-      NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send back probe succeed " << in_port);
+      NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " send back probe succeed " << in_port);
     }
     else {
       p.tx_dropped++;
-      NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " send back probe failed " << in_port);
+      NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " send back probe failed " << in_port);
     }
 
     // transpond forward probe
@@ -166,11 +166,11 @@ void OpenFlowSwitchNetDevice::TranspondProbe(Ptr<const Packet> packet, uint16_t 
         if (p.netdev->SendFrom (pkt->Copy (), GetAddress(), GetAddress(), 2048)) {
           p.tx_packets++;
           p.tx_bytes += packet->GetSize() + 18;    // wangxing modified, EthernetHeader: 18
-          NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond forward probe succeed " << it->second[i]);
+          NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " transpond forward probe succeed " << it->second[i]);
         }
         else {
           p.tx_dropped++;
-          NS_LOG_WARN("At time " << Simulator::Now().GetMicroSeconds() << "us switch " << m_id << " transpond forward probe failed " << it->second[i]);
+          NS_LOG_WARN("At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id << " transpond forward probe failed " << it->second[i]);
         }
       }
     }
@@ -181,6 +181,8 @@ void OpenFlowSwitchNetDevice::HandleProbe(ProbeInfo &probe)
 {
   NS_LOG_FUNCTION(this);
 
+  NS_LOG_WARN("!!!!At time " << Simulator::Now().GetNanoSeconds() << "ns switch " << m_id
+    << " receive back probe <" << probe.src << "," << probe.dst << ">");
   m_linkRTT[probe.src][probe.dst] = Simulator::Now().GetTimeStep() - m_probeSendTime[probe.idx];
   
   int64_t rtt = m_linkRTT[probe.src][probe.dst];
@@ -860,7 +862,7 @@ OpenFlowSwitchNetDevice::ReceiveFromDevice (Ptr<NetDevice> netdev, Ptr<const Pac
                   if (packet->PeekPacketTag (probeTag)) {   // Check whether it's probe packet
                     m_ports[i].rx_packets++;
                     m_ports[i].rx_bytes += packet->GetSize() + 18;
-                    TranspondProbe(packet, i);
+                    Simulator::Schedule (NanoSeconds(10), &OpenFlowSwitchNetDevice::TranspondProbe, this, packet, i);
                     return;
                   }
                   /***************wangxing added***************/
