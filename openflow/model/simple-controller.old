@@ -100,14 +100,14 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   std::map<uint16_t, std::set<uint16_t> > solution;
   maxflow.Solution(solution);
   // show result
-  /*for (std::map<uint16_t, std::set<uint16_t> >::iterator iter = solution.begin(); iter != solution.end(); ++iter) {
+  for (std::map<uint16_t, std::set<uint16_t> >::iterator iter = solution.begin(); iter != solution.end(); ++iter) {
     std::cout << "switch " << iter->first << "(" << iter->second.size() << "): ";
     for (std::set<uint16_t>::iterator it = iter->second.begin(); it != iter->second.end(); ++it) {
       Edge &edge = topo->m_edges[*it];
       std::cout << "<" << edge.src << "," << edge.dst << ">, ";
     }
     std::cout << std::endl;
-  }*/
+  }
   StartDelayMeasure(solution);
 
   /**
@@ -123,7 +123,7 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   /**
    * load banlance
    */
-  StartLoadBanlance();
+  // StartLoadBanlance();
 }
 
 void SimpleController::AddSwitch (Ptr<OpenFlowSwitchNetDevice> swtch)
@@ -443,66 +443,120 @@ void SimpleController::LoadBanlanceCalculate(void)
   NS_LOG_FUNCTION(this);
 
   // use copy to calculate
-  m_util_copy = m_util;
+  std::vector<float> util_now = m_util;
+  std::vector<Flow_t> flow_now  = m_flows;
+  std::vector<std::vector<Path_t> > path_now = m_curPath;
 
-  // find links that more than threshold, and sort from large to small
+  // if the max utilization more than threshold, do load banlance
+  m_util_copy = m_util;
   uint16_t link_max = FindLinkWithMaxUtil();
   if (m_util_copy[link_max] < LINK_THRESHOLD)
       return;
 
   // start time
-  struct timeval start,stop;
-  memset(&start,0, sizeof(struct timeval));
-  memset(&stop,0, sizeof(struct timeval));
-  gettimeofday(&start,0);
+  struct timeval start1, start2, start3, stop;
+  memset(&start1, 0, sizeof(struct timeval));
+  memset(&start2, 0, sizeof(struct timeval));
+  memset(&start3, 0, sizeof(struct timeval));
+  memset(&stop, 0, sizeof(struct timeval));
+  
+  gettimeofday(&start1,0);
 
+  // simple
   while (1) {
-    std::cout << "#########################################" << std::endl;
-    std::cout << "At time " << Simulator::Now().GetSeconds() << "s load banlance calculate begin" << std::endl;
-
     Links_t links = FindAllNotGoodLink();
-    // handle the link with max utilization
-    link_max = FindLinkWithMaxUtil();
-    std::cout << "max link <" << m_topo->m_edges[link_max].src - m_topo->m_numHost << "," 
-              << m_topo->m_edges[link_max].dst - m_topo->m_numHost << "> " << m_util_copy[link_max] << std::endl;
+    link_max = FindLinkWithMaxUtil();   // handle the link with max utilization
     std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
-
-    // handle flow from large to small
+    
     uint16_t idx;
     for (idx = 0; idx < flows.size(); ++idx) {
-      // flow
-      Flow_t &flow = flows[idx];
+      Flow_t &flow = flows[idx];  // flow
       if (flow.flag) continue;    // the flow have been handle
-      std::cout << "*******************************" << std::endl;
-      std::cout << "handle the flow: " << flow.src << "--->" << flow.dst << " " << flow.util << std::endl;
-    
-      // store origin utilization
-      std::vector<float> util_origin = m_util_copy;
 
+      std::vector<float> util_origin = m_util_copy; // store origin utilization
+      
       SwPort_t sw_port;
-      // Path_t newPath;
-      // Path_t newPath = GetNewPathWithoutSomeLink(flow, links, sw_port);    // simple local search
-      // Path_t newPath = GetNewPathWithoutSomeLinkGreedy(flow, links, sw_port);   // local search greedy
-      Path_t newPath = GetNewPathWithoutSomeLinkSR(flow, links, sw_port);   // local search greedy
-      m_topo->PrintPath(newPath, "newPath: ");
+      Path_t newPath = GetNewPathWithoutSomeLink(flow, links, sw_port);    // simple local search
 
       if (newPath.empty()) {
-        std::cout << "Can not find a new path, continue\n";
         m_util_copy = util_origin;
         continue;
       }
       else {
         flow.flag = true;   // record the flow
         m_curPath[flow.src][flow.dst] = newPath;    // update flow path
-        for (uint16_t i = 0; i < newPath.size(); ++i) {
-          
-        }
-        UpdateFlow(flow.src, flow.dst, sw_port);    // update flow
-        // print out tcam number
-        for (uint16_t i = 0; i < m_tcamNum.size(); ++i) {
-          m_tcam_file << m_tcamNum[i] << " ";
-        }
-        m_tcam_file << std::endl;
+        break;
+      }
+    }
+    if (idx == flows.size())  break;  // have no flow can move
+  }
+
+  gettimeofday(&start2,0);
+  ShowTimeCost(&start1, &start2);
+
+  // greedy
+  m_util_copy = util_now;
+  m_flows = flow_now;
+  m_curPath = path_now;
+  while (1) {
+    Links_t links = FindAllNotGoodLink();
+    link_max = FindLinkWithMaxUtil();   // handle the link with max utilization
+    std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
+
+    // handle flow from large to small
+    uint16_t idx;
+    for (idx = 0; idx < flows.size(); ++idx) {
+      Flow_t &flow = flows[idx];  // flow
+      if (flow.flag) continue;    // the flow have been handle
+    
+      std::vector<float> util_origin = m_util_copy; // store origin utilization
+      SwPort_t sw_port;
+      Path_t newPath = GetNewPathWithoutSomeLinkGreedy(flow, links, sw_port);   // local search greedy
+
+      if (newPath.empty()) {
+        m_util_copy = util_origin;
+        continue;
+      }
+      else {
+        flow.flag = true;   // record the flow
+        m_curPath[flow.src][flow.dst] = newPath;    // update flow path
+        break;
+      }
+    }
+    if (idx == flows.size())  break;  // have no flow can move
+  }
+
+  gettimeofday(&start3,0);
+  ShowTimeCost(&start2, &start3);
+
+  // SR
+  m_util_copy = util_now;
+  m_flows = flow_now;
+  m_curPath = path_now;
+  while (1) {
+    Links_t links = FindAllNotGoodLink();
+    link_max = FindLinkWithMaxUtil();   // handle the link with max utilization
+    std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
+
+    // handle flow from large to small
+    uint16_t idx;
+    for (idx = 0; idx < flows.size(); ++idx) {
+      Flow_t &flow = flows[idx];  // flow
+      if (flow.flag) continue;    // the flow have been handle
+    
+      std::vector<float> util_origin = m_util_copy;   // store origin utilization
+
+      SwPort_t sw_port;
+      Path_t newPath = GetNewPathWithoutSomeLinkSR(flow, links, sw_port);   // local search greedy
+
+      if (newPath.empty()) {
+        m_util_copy = util_origin;
+        continue;
+      }
+      else {
+        flow.flag = true;   // record the flow
+        m_curPath[flow.src][flow.dst] = newPath;    // update flow path
+        // UpdateFlow(flow.src, flow.dst, sw_port);    // update flow
         break;
       }
     }
@@ -511,7 +565,7 @@ void SimpleController::LoadBanlanceCalculate(void)
 
   // end time and show
   gettimeofday(&stop,0);
-  ShowTimeCost(&start, &stop);
+  ShowTimeCost(&start3, &stop);
 
   // if (Simulator::Now() + BANLANCE_PERIOD < m_topo->m_simuTime)
     // Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculate, this);
@@ -730,45 +784,6 @@ Path_t SimpleController::GetNewPathWithoutSomeLinkGreedy(Flow_t &flow, const Lin
   UpdateUtilWithDemand(newPaths[index], flow.util, true);
   sw_port = sw_ports[index];
   return newPaths[index];
-
-
-  /**************************************************************************/
-  /**************************************************************************/
-  // evaluate each new shortest path
-  /*std::vector<double> max_util(newPaths.size(), 10.0);
-  std::vector<SwPort_t> sw_ports(newPaths.size(), SwPort_t());
-  for (uint16_t i = 0; i < newPaths.size(); ++i) {
-    if (TcamCheck(oldPath, newPaths[i], sw_ports[i])) {
-      double max = 0;
-      for (uint16_t j = 1; j < newPaths[i].size() - 1; ++j) {
-        double cur_util;
-        cur_util = (newPaths[i][j] < m_edgeNum) ? m_util_copy[newPaths[i][j]] : m_util_copy[newPaths[i][j] - m_edgeNum];       
-        if (max < cur_util)
-          max = cur_util;
-      }
-      max_util[i] = max + flow.util;
-    }
-  }
-
-  // choose the best new shortest path
-  uint16_t index = UINT16_MAX;
-  double min = 10.0;
-  for (uint16_t i = 0; i < max_util.size(); ++i) {
-    if (max_util[i] < min) {
-      index = i;
-      min = max_util[i];
-    }
-  }
-
-  if (index == UINT16_MAX) {  // no the best shortest new path
-    return Path_t();
-  }
-  if (max_old < max_util[index]) {  // the utilization of new path more than original max utilization
-    return Path_t(); 
-  }
-  UpdateUtilWithDemand(newPaths[index], flow.util, true);
-  sw_port = sw_ports[index];
-  return newPaths[index];*/
 }
 
 Paths_t SimpleController::GetKShortestPath(Flow_t &flow, const Links_t &links)
@@ -895,46 +910,6 @@ Path_t SimpleController::GetNewPathWithoutSomeLinkSR(Flow_t &flow, const Links_t
   UpdateUtilWithDemand(newPaths[index], flow.util, true);
   sw_port = sw_ports[index];
   return newPaths[index];
-
-
-
-  /*********************************************************/
-  /*********************************************************/
-/*  // evaluate each new shortest path
-  std::vector<double> max_util(newPaths.size(), 10.0);
-  std::vector<SwPort_t> sw_ports(newPaths.size(), SwPort_t());
-  for (uint16_t i = 0; i < newPaths.size(); ++i) {
-    if (TcamCheck(oldPath, newPaths[i], sw_ports[i])) {
-      double max = 0;
-      for (uint16_t j = 1; j < newPaths[i].size() - 1; ++j) {
-        double cur_util;
-        cur_util = (newPaths[i][j] < m_edgeNum) ? m_util_copy[newPaths[i][j]] : m_util_copy[newPaths[i][j] - m_edgeNum];       
-        if (max < cur_util)
-          max = cur_util;
-      }
-      max_util[i] = max + flow.util;
-    }
-  }
-
-  // choose the best new shortest path
-  uint16_t index = UINT16_MAX;
-  double min = 10.0;
-  for (uint16_t i = 0; i < max_util.size(); ++i) {
-    if (max_util[i] < min) {
-      index = i;
-      min = max_util[i];
-    }
-  }
-
-  if (index == UINT16_MAX) {  // no the best shortest new path
-    return Path_t();
-  }
-  if (max_old < max_util[index]) {  // the utilization of new path more than original max utilization
-    return Path_t(); 
-  }
-  UpdateUtilWithDemand(newPaths[index], flow.util, true);
-  sw_port = sw_ports[index];
-  return newPaths[index];*/
 }
 
 Paths_t SimpleController::GetAllNeighbourhoodSolution(Flow_t &flow, const Links_t &links)

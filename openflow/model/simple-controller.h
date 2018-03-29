@@ -47,17 +47,15 @@ private:
   std::vector<Flow_t> GetAllFlowsOnLink(uint16_t link);
 
   // simple shortest path
-  Path_t GetNewPathWithoutSomeLink(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
-
+  Path_t GetNewPathWithoutSomeLink(Flow_t &flow, const Links_t &links, double maxUtil, SwPort_t &sw_port);
   // greedy shortest path
-  Path_t GetNewPathWithoutSomeLinkGreedy(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
-  Paths_t GetKShortestPath(Flow_t &flow, const Links_t &links);
-  Path_t Transform(BasePath* base);
-  
+  Path_t GetNewPathWithoutSomeLinkGreedy(Flow_t &flow, const Links_t &links, double maxUtil, SwPort_t &sw_port);
   // segement routing path
-  Path_t GetNewPathWithoutSomeLinkSR(Flow_t &flow, const Links_t &links, SwPort_t &sw_port);
+  Path_t GetNewPathWithoutSomeLinkSR(Flow_t &flow, const Links_t &links, double maxUtil, SwPort_t &sw_port);
   Paths_t GetAllNeighbourhoodSolution(Flow_t &flow, const Links_t &links);
 
+  double GetMaxUtil(void);
+  double GetMaxUtilOnPath(const Path_t &path);
   void UpdateUtilWithDemand(const Path_t &path, double demand, bool isIncrease);
   bool TcamCheck(const Path_t &oldPath, const Path_t &newPath, SwPort_t &sw_port);
   void UpdateFlow(uint16_t src, uint16_t dst, SwPort_t &sw_port);
@@ -83,8 +81,8 @@ private:
   std::vector<Ptr<OpenFlowSwitchNetDevice> > m_swtches;
 
   // for utlization
-  std::vector<float> m_util;
-  std::vector<float> m_util_copy;
+  std::vector<double> m_util;
+  std::vector<double> m_util_copy;
   std::ofstream m_util_file;
   
   // for RTT

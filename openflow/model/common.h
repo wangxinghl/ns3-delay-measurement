@@ -13,7 +13,7 @@ namespace ns3 {
 
 const uint16_t GAMA = 5;
 
-const double ALPH = 0.5;
+const double WEIGHT = 0.5;
 
 const double LINK_THRESHOLD = 0.5;
 

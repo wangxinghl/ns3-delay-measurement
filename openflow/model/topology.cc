@@ -188,6 +188,87 @@ Path_t Topology::Dijkstra (uint16_t src, uint16_t dst)
   return temp;
 }
 
+Paths_t Topology::K_Dijkstra (uint16_t src, uint16_t dst)
+{
+  NS_LOG_FUNCTION (this);
+
+  const int INF = std::numeric_limits<uint16_t>::max ();
+  uint16_t nodeNum = m_numSw + m_numHost;
+
+  int dist[nodeNum];
+  std::vector<int> parent[nodeNum];
+  bool visit[nodeNum];
+  // Initialize 
+  for (int i = 0; i < nodeNum; ++i) {
+    dist[i] = INF;
+    visit[i] = false;
+  }
+  
+  /* Dijkstra */
+  dist[src] = 0;
+  for (int i = 0; i < nodeNum; ++i) {
+    // find the node with minimize distance
+    int min = INF;
+    for (int j = 0; j < nodeNum; ++j) {
+      if (!visit[j] && dist[j] < min)
+        min = dist[j];
+    }
+    std::set<int> minNodes;
+    for (int j = 0; j < nodeNum; ++j) {
+      if (!visit[j] && dist[j] == min)
+        minNodes.insert(j);
+    }
+    
+    // arrive the distination node
+    if (minNodes.find(dst) != minNodes.end())
+      break;
+
+    for (std::set<int>::iterator it = minNodes.begin(); it != minNodes.end(); ++it) {
+      visit[*it] = true;
+      for (int j = 0; j < nodeNum; ++j) {
+        if (adj[*it][j] >= 0 && (m_edges[adj[*it][j]].dist + dist[*it] <= dist[j])) {
+          if (m_edges[adj[*it][j]].dist + dist[*it] < dist[j])
+            parent[j].clear();
+          dist[j] = m_edges[adj[*it][j]].dist + dist[*it];
+          parent[j].push_back(adj[*it][j]);
+        }
+      }
+    }
+  }
+
+  // find the path (reverse path)
+  Paths_t paths;
+  for (uint16_t i = 0; i < parent[dst].size(); i++)
+    paths.push_back(Path_t(1, parent[dst][i]));
+  uint16_t len = 0;
+  int start = dst;
+  while (!parent[start].empty()) {
+    len++;
+    start = m_edges[parent[start][0]].src;
+  }
+  for (uint16_t i = 1; i < len; ++i) {
+    Paths_t increase;
+    for (uint16_t j = 0; j < paths.size(); ++j) {
+      start = m_edges[paths[j].back()].src;
+      for (uint16_t k = 1; k < parent[start].size(); ++k) {
+        Path_t path = paths[j];
+        path.push_back(parent[start][k]);
+        increase.push_back(path);
+      }
+      paths[j].push_back(parent[start][0]);
+    }
+    paths.insert(paths.end(), increase.begin(), increase.end());
+  }
+
+  for (uint16_t i = 0; i < paths.size(); ++i) {
+    Path_t temp;
+    for (uint16_t j = 0; j < len; ++j)
+      temp.push_back(paths[i][len - 1 - j]);
+    paths[i] = temp;
+  }
+  return paths;
+}
+
 uint16_t Topology::GetSwitchEdgeNum(void)
 {
     uint16_t cnt = 0;

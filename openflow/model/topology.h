@@ -33,6 +33,7 @@ public:
   uint64_t GetBandwidth (void);
 
   Path_t Dijkstra (uint16_t src, uint16_t dst);
+  Paths_t K_Dijkstra (uint16_t src, uint16_t dst);
 
   uint16_t GetSwitchEdgeNum(void);
   std::map<uint16_t, uint16_t> GetEdgeAdjacentNode(uint16_t edge, uint16_t depth);

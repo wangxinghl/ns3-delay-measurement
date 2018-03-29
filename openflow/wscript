@@ -176,9 +176,6 @@ def build(bld):
         obj.source.append('model/topology.cc')
         obj.source.append('model/simple-controller.cc')
         obj.source.append('model/max-flow.cc')
-        obj.source.append('model/Graph.cc')
-        obj.source.append('model/DijkstraShortestPathAlg.cc')
-        obj.source.append('model/YenTopKShortestPathsAlg.cc')
 
         obj.env.append_value('DEFINES', 'NS3_OPENFLOW')
         obj_test.source.append('test/openflow-switch-test-suite.cc')
@@ -189,11 +186,6 @@ def build(bld):
         headers.source.append('model/topology.h')
         headers.source.append('model/simple-controller.h')
         headers.source.append('model/max-flow.h')
-        headers.source.append('model/Graph.h')
-        headers.source.append('model/GraphElements.h')
-        headers.source.append('model/DijkstraShortestPathAlg.h')
-        headers.source.append('model/YenTopKShortestPathsAlg.h')
-
 
     if bld.env['ENABLE_EXAMPLES'] and bld.env['ENABLE_OPENFLOW']:
         bld.recurse('examples')
