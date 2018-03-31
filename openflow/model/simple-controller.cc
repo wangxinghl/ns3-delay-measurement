@@ -94,20 +94,20 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   /**
    * max-flow calculate
    */
-  MaxFlow maxflow;
+  /*MaxFlow maxflow;
   maxflow.Calculate(topo, 2, 8);    // depth = 2, max = 8;
   std::map<uint16_t, std::set<uint16_t> > solution;
   maxflow.Solution(solution);
   // show result
-  /*for (std::map<uint16_t, std::set<uint16_t> >::iterator iter = solution.begin(); iter != solution.end(); ++iter) {
+  for (std::map<uint16_t, std::set<uint16_t> >::iterator iter = solution.begin(); iter != solution.end(); ++iter) {
     std::cout << "switch " << iter->first << "(" << iter->second.size() << "): ";
     for (std::set<uint16_t>::iterator it = iter->second.begin(); it != iter->second.end(); ++it) {
       Edge &edge = topo->m_edges[*it];
       std::cout << "<" << edge.src << "," << edge.dst << ">, ";
     }
     std::cout << std::endl;
-  }*/
-  StartDelayMeasure(solution);
+  }
+  StartDelayMeasure(solution);*/
 
   /**
    * Set data flow entry
@@ -430,6 +430,7 @@ void SimpleController::StartLoadBanlance(void)
   }*/
 
   Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculate, this);
+  // Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculateForTest, this);
 }
 
 void SimpleController::LoadBanlanceCalculate(void)
@@ -454,6 +455,9 @@ void SimpleController::LoadBanlanceCalculate(void)
     Links_t links = FindAllNotGoodLink();
     if (links.empty())
       links.push_back(link_max);
+    // // show
+    for (uint16_t i = 0; i < links.size(); ++i)
+      std::cout << "congestion link <" << m_topo->m_edges[links[i]].src - m_topo->m_numHost << "," << m_topo->m_edges[links[i]].dst - m_topo->m_numHost << "> " << m_util_copy[links[i]] << std::endl;
 
     // handle flow from large to small
     std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
@@ -487,13 +491,25 @@ void SimpleController::LoadBanlanceCalculate(void)
       gettimeofday(&start3,0);
       Path_t newPath3 = GetNewPathWithoutSomeLinkSR(flow, links, max_old, sw_port);  // segment routing greedy
       gettimeofday(&stop,0);
+
       // show time
-      ShowTimeCost(&start1, &start2);
-      ShowTimeCost(&start2, &start3);
-      ShowTimeCost(&start3, &stop);
+      if (newPath1.empty() && newPath2.empty() && newPath3.empty()) {
+        std::cout << "empty\n";
+        ShowTimeCost(&start1, &start2);
+        ShowTimeCost(&start2, &start3);
+        ShowTimeCost(&start3, &stop);  
+      }
+      if ((!newPath1.empty()) && (!newPath2.empty()) && (!newPath3.empty())) {
+        std::cout << "notempty\n";
+        ShowTimeCost(&start1, &start2);
+        ShowTimeCost(&start2, &start3);
+        ShowTimeCost(&start3, &stop);  
+      }
+      
+      
 
       Path_t newPath;
-      uint16_t choose = 1;
+      uint16_t choose = 3;
       switch(choose) {
         case 1: newPath = newPath1; break;
         case 2: newPath = newPath2; break;
@@ -526,6 +542,170 @@ void SimpleController::LoadBanlanceCalculate(void)
     Simulator::Schedule (BANLANCE_PERIOD, &SimpleController::LoadBanlanceCalculate, this);
 }
 
+void SimpleController::LoadBanlanceCalculateForTest(void)
+{
+  NS_LOG_FUNCTION(this);
+
+  // use the copy to calculate
+  std::vector<double> util_original = m_util;
+  std::vector<std::vector<Path_t> > curPath_original = m_curPath;  // m_curPath[host][host]
+  std::vector<Flow_t> flows_original = m_flows;
+  
+  // find the link with max utilization
+  m_util_copy = util_original;
+  uint16_t link_max = FindLinkWithMaxUtil();
+  if (m_util_copy[link_max] < LINK_THRESHOLD) return;
+
+  std::cout << "At time " << Simulator::Now().GetSeconds() << "s Test begin" << std::endl;
+  struct timeval start1, start2, start3, stop;
+  memset(&start1, 0, sizeof(struct timeval));
+  memset(&start2, 0, sizeof(struct timeval));
+  memset(&start3, 0, sizeof(struct timeval));
+  memset(&stop, 0, sizeof(struct timeval));
+
+  // SPFR Algorithm
+  gettimeofday(&start1,0);
+  m_util_copy = util_original;
+  m_flows = flows_original;
+  m_curPath = curPath_original;
+  std::cout << "SPFR Algorithm ################################\n";
+  while (1) {
+    link_max = FindLinkWithMaxUtil();
+    std::cout << "max link <" << m_topo->m_edges[link_max].src - m_topo->m_numHost << "," 
+              << m_topo->m_edges[link_max].dst - m_topo->m_numHost << "> " << m_util_copy[link_max] << std::endl;
+    Links_t links = FindAllNotGoodLink();
+    if (links.empty())
+      links.push_back(link_max);
+
+    // handle flow from large to small
+    std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
+    uint16_t idx;
+    for (idx = 0; idx < flows.size(); ++idx) {
+      // flow
+      Flow_t &flow = flows[idx];
+      if (flow.flag) continue;   // the flow have been handle
+
+      // old path
+      Path_t &oldPath = m_curPath[flow.src][flow.dst];
+      double max_old = GetMaxUtil();  // get original max utilization
+      UpdateUtilWithDemand(oldPath, flow.util, false);   // for old path, decrease
+
+      // get new path
+      SwPort_t sw_port;
+      Path_t newPath = GetNewPathWithoutSomeLink(flow, links, max_old, sw_port);    // shortest path
+
+      if (newPath.empty()) {
+        UpdateUtilWithDemand(oldPath, flow.util, true);   // return
+        continue;
+      }
+      else {
+        flow.flag = true;   // record the flow
+        UpdateUtilWithDemand(newPath, flow.util, true);    // for new path, increase
+        m_curPath[flow.src][flow.dst] = newPath;    // update flow path
+        break;
+      }
+    }
+    if (idx == flows.size())  break;  // have no flow can move
+  }
+
+  // KSPGR Algorithm
+  gettimeofday(&start2,0);
+  m_util_copy = util_original;
+  m_flows = flows_original;
+  m_curPath = curPath_original;
+  std::cout << "KSPGR Algorithm ################################\n";
+  while (1) {
+    link_max = FindLinkWithMaxUtil();
+    std::cout << "max link <" << m_topo->m_edges[link_max].src - m_topo->m_numHost << "," 
+              << m_topo->m_edges[link_max].dst - m_topo->m_numHost << "> " << m_util_copy[link_max] << std::endl;
+    Links_t links = FindAllNotGoodLink();
+    if (links.empty())
+      links.push_back(link_max);
+
+    // handle flow from large to small
+    std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
+    uint16_t idx;
+    for (idx = 0; idx < flows.size(); ++idx) {
+      // flow
+      Flow_t &flow = flows[idx];
+      if (flow.flag) continue;   // the flow have been handle
+
+      // old path
+      Path_t &oldPath = m_curPath[flow.src][flow.dst];
+      double max_old = GetMaxUtil();  // get original max utilization
+      UpdateUtilWithDemand(oldPath, flow.util, false);   // for old path, decrease
+
+      // get new path
+      SwPort_t sw_port;
+      Path_t newPath = GetNewPathWithoutSomeLinkGreedy(flow, links, max_old, sw_port);    // shortest path
+
+      if (newPath.empty()) {
+        UpdateUtilWithDemand(oldPath, flow.util, true);   // return
+        continue;
+      }
+      else {
+        flow.flag = true;   // record the flow
+        UpdateUtilWithDemand(newPath, flow.util, true);    // for new path, increase
+        m_curPath[flow.src][flow.dst] = newPath;    // update flow path
+        break;
+      }
+    }
+    if (idx == flows.size())  break;  // have no flow can move
+  }
+
+  // SRGR Algorithm
+  gettimeofday(&start3,0);
+  m_util_copy = util_original;
+  m_flows = flows_original;
+  m_curPath = curPath_original;
+  std::cout << "SRGR Algorithm ################################\n";
+  while (1) {
+    link_max = FindLinkWithMaxUtil();
+    std::cout << "max link <" << m_topo->m_edges[link_max].src - m_topo->m_numHost << "," 
+              << m_topo->m_edges[link_max].dst - m_topo->m_numHost << "> " << m_util_copy[link_max] << std::endl;
+    Links_t links = FindAllNotGoodLink();
+    if (links.empty())
+      links.push_back(link_max);
+
+    // handle flow from large to small
+    std::vector<Flow_t> flows = GetAllFlowsOnLink(link_max);  // find all the flows on this link, and sort from large to small
+    uint16_t idx;
+    for (idx = 0; idx < flows.size(); ++idx) {
+      // flow
+      Flow_t &flow = flows[idx];
+      if (flow.flag) continue;   // the flow have been handle
+
+      // old path
+      Path_t &oldPath = m_curPath[flow.src][flow.dst];
+      double max_old = GetMaxUtil();  // get original max utilization
+      UpdateUtilWithDemand(oldPath, flow.util, false);   // for old path, decrease
+
+      // get new path
+      SwPort_t sw_port;
+      Path_t newPath = GetNewPathWithoutSomeLinkSR(flow, links, max_old, sw_port);    // shortest path
+
+      if (newPath.empty()) {
+        UpdateUtilWithDemand(oldPath, flow.util, true);   // return
+        continue;
+      }
+      else {
+        flow.flag = true;   // record the flow
+        UpdateUtilWithDemand(newPath, flow.util, true);    // for new path, increase
+        m_curPath[flow.src][flow.dst] = newPath;    // update flow path
+        break;
+      }
+    }
+    if (idx == flows.size())  break;  // have no flow can move
+  }
+  gettimeofday(&stop,0);
+  
+  ShowTimeCost(&start1, &start2);
+  ShowTimeCost(&start2, &start3);
+  ShowTimeCost(&start3, &stop);
+  std::cout << "At time " << Simulator::Now().GetSeconds() << "s Test end" << std::endl;
+  exit(0);
+}
+
 Links_t SimpleController::FindAllNotGoodLink(void)
 {
   NS_LOG_FUNCTION(this);
@@ -550,12 +730,6 @@ Links_t SimpleController::FindAllNotGoodLink(void)
     uint16_t temp = links[i];
     links[i] = links[index];
     links[index] = temp;
-  }
-
-  // show
-  for (uint16_t i = 0; i < links.size(); ++i) {
-    std::cout << "congestion link <" << m_topo->m_edges[links[i]].src - m_topo->m_numHost << "," 
-              << m_topo->m_edges[links[i]].dst - m_topo->m_numHost << "> " << m_util_copy[links[i]] << std::endl;
   }
   return links;
 }
@@ -593,10 +767,10 @@ std::vector<Flow_t> SimpleController::GetAllFlowsOnLink(uint16_t link)
   std::sort(flows.begin(), flows.end(), flow_compare);
 
   // show
-  std::cout << "there are " << flows.size() << " flows on the most congested link\n";
-  for (uint16_t i = 0; i < flows.size(); ++i) {
-    std::cout << flows[i].src << "--->"<< flows[i].dst << ": " << flows[i].util << "\n";
-  }
+  // std::cout << "there are " << flows.size() << " flows on the most congested link\n";
+  // for (uint16_t i = 0; i < flows.size(); ++i) {
+  //   std::cout << flows[i].src << "--->"<< flows[i].dst << ": " << flows[i].util << "\n";
+  // }
   return flows;
 }
 
@@ -1057,7 +1231,7 @@ void SimpleController::ShowTimeCost(struct timeval *begin, struct timeval *end)
     result.tv_sec--;
     result.tv_usec += 1000000;
   }
-  printf("Total time : %d s,%d us\n",(int)result.tv_sec,(int)result.tv_usec);
+  printf("Total time: %d s, %d us\n",(int)result.tv_sec,(int)result.tv_usec);
 }
 
 }	// namespace ns3

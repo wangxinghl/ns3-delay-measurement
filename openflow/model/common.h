@@ -11,15 +11,15 @@
 
 namespace ns3 {
 
-const uint16_t GAMA = 5;
+const uint16_t GAMA = 10;
 
 const double WEIGHT = 0.5;
 
 const double LINK_THRESHOLD = 0.5;
 
-const uint16_t TCAM_MAX = 10;
+const uint16_t TCAM_MAX = 50;
 
-const Time BANLANCE_PERIOD = Seconds(1);
+const Time BANLANCE_PERIOD = Seconds(0.5);
 
 const Time PROBE_PERIOD = Seconds(0.1);
 

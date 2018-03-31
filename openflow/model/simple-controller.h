@@ -42,6 +42,7 @@ private:
   /***************************************************/
   void StartLoadBanlance(void);
   void LoadBanlanceCalculate(void);
+  void LoadBanlanceCalculateForTest(void);
   Links_t FindAllNotGoodLink(void);
   uint16_t FindLinkWithMaxUtil(void);
   std::vector<Flow_t> GetAllFlowsOnLink(uint16_t link);
