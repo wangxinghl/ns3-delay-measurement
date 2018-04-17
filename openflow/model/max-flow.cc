@@ -22,124 +22,71 @@ TypeId MaxFlow::GetTypeId (void)
 
 MaxFlow::MaxFlow()
 {
+	m_topo = NULL;
 	m_nodeNum = 0;
 	m_edgeNum = 0;
 	m_totalNum = 0;
 	m_src = UINT16_MAX;
 	m_dst = UINT16_MAX;
-	m_topo = NULL;
 }
 
 MaxFlow::~MaxFlow()
 {
-	FlowEdge *cur, *next;
-	for (uint16_t i = 0; i < m_totalNum; i++) {
-		cur = m_nodes[i].first;
-		while (cur) {
-			next = cur->next;
-			delete cur;
-			cur = next;
-		}
-	}
+	m_adj.clear();
+	m_nodes.clear();
+	m_edges.clear();
 }
 
 void MaxFlow::Calculate(Ptr<Topology> topo, uint16_t depth, uint16_t max)
 {
-	// initialize the flow topology
-	Initialize(topo, depth, max);
+	Initialize(topo, depth, max);	// initialize the flow topology
+	MaxFlowCalculate();		// get the initial results
 
-	// put flow
+	std::vector<FlowEdge> edges_copy;
 	while (1) {
-		ResetNodeFlag();
-		AddTag();
-		if (AdjustFlow() == 1) break;
-	}
+		edges_copy = m_edges;
+		std::vector<uint16_t> choosed = GetChoosedNode();
+		while (!choosed.empty()) {
+			uint16_t first = choosed[0];
+			ReleaseFlow(first);
+			m_edges[m_nodes[first].adj].cap = 0;
+			MaxFlowCalculate();
 
-	// try to push flow
-	while (1) {
-		std::vector<uint16_t> choose = GetChooseNode();
-		std::vector<uint16_t>::iterator it = choose.begin();
-		for (; it != choose.end(); it++) {
-			m_nodes[*it].choose = false;
-			ReleaseFlow(*it);
-			while (1) {
-				ResetNodeFlag();
-				AddTag();
-				if (AdjustFlow() == 1) break;
-			}
 			if (IsCoverAll()) break;
 			
-			m_nodes[*it].choose = true;
-			while (1) {
-				ResetNodeFlag();
-				AddTag();
-				if (AdjustFlow() == 1) break;
-			}
+			choosed.erase(choosed.begin());
+			m_edges = edges_copy;
 		}
-		if (it == choose.end()) break;
+		if (choosed.empty()) break;
 	}
 	NS_LOG_INFO("Calculate over: node " << m_nodeNum << " edge" << m_edgeNum);
 }
 
-void MaxFlow::ShowSolution(std::ostream &out)
+std::map<uint16_t, std::set<uint16_t> > MaxFlow::Solution(bool show)
 {
-	std::map<uint16_t, std::vector<uint16_t> > result;
-	for (uint16_t i = 0; i < m_edgeNum; i++) {	// Get result
-		FlowEdge *p = m_nodes[i].first;
-		while (p && p->flow == 0)
-			p = p->next;
+	std::map<uint16_t, std::set<uint16_t> > solution;		// map<node_id, set<link_id> >
 
-		NS_ASSERT(p != 0);
-		result[p->dst - m_edgeNum + m_topo->m_numHost].push_back(i);
-	}
-
-	out << "result = " << result.size() << std::endl;
-	std::map<uint16_t, std::vector<uint16_t> >::iterator it;
-	for (it = result.begin(); it != result.end(); it++) {
-		out << "node " << it->first << "(" << it->second.size() << "): ";
-		for (std::vector<uint16_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
-			Edge &edge = m_topo->m_edges[*iter];
-			out << *iter << "<" << edge.src << "," << edge.dst << ">, ";
-			}
-		out << std::endl;
-	}
-}
-
-void MaxFlow::Solution(std::map<uint16_t, std::set<uint16_t> > &solution)
-{
+	uint16_t adj;
 	for (uint16_t i = 0; i < m_edgeNum; i++) {	// Get solution
-		FlowEdge *p = m_nodes[i].first;
-		while (p && p->flow == 0)
-			p = p->next;
-
-		NS_ASSERT(p != 0);	// p can't be NULL
-		solution[p->dst - m_edgeNum].insert(i);
+		adj = m_nodes[i].adj;
+		while (adj != UINT16_MAX && m_edges[adj].flow == 0)
+			adj = m_edges[adj].next;
+		NS_ASSERT(adj != UINT16_MAX);	// p can't be NULL
+		solution[m_edges[adj].dst - m_edgeNum].insert(i);
 	}
-}
 
-void MaxFlow::OutputFile(uint16_t max)
-{
-	std::ofstream fout("../cplex/maxflow/maxflow.dat");
-	fout << "nodeN=" << m_nodeNum << ";\n";
-	fout << "edgeM=" << m_edgeNum << ";\n";
-	fout << "K=" << max << ";\n";
-	fout << "delta=[\n";
-	for (uint16_t i = 0; i < m_edgeNum; i++) {
-		fout << "[";
-		FlowEdge *p = m_nodes[i].first;
-		for (uint16_t j = 0; j < m_nodeNum; j++) {
-			if (p && p->dst - m_edgeNum == j) {
-				fout << 1 << ",";
-				p = p->next;
+	if (show) {
+		std::cout << "result = " << solution.size() << std::endl;
+		for (std::map<uint16_t, std::set<uint16_t> >::iterator it = solution.begin(); it != solution.end(); it++) {
+			std::cout << "switch " << it->first << "(" << it->second.size() << "): ";
+			for (std::set<uint16_t>::iterator iter = it->second.begin(); iter != it->second.end(); iter++) {
+				Edge &edge = m_topo->m_edges[*iter];
+				std::cout << "<" << edge.src << "," << edge.dst << ">, ";
 			}
-			else {
-				fout << 0 << ",";
-			}
+			std::cout << std::endl;
 		}
-		fout << "],\n";
 	}
-	fout << "];\n";
-	fout.close();
+	return solution;
 }
 
 void MaxFlow::Initialize(Ptr<Topology> topo, uint16_t depth, uint16_t max)
@@ -160,102 +107,116 @@ void MaxFlow::Initialize(Ptr<Topology> topo, uint16_t depth, uint16_t max)
 	*/
 	m_nodes.resize(m_totalNum);		// Initialize the nodes
 
-	FlowEdge **cur, *next;
-	cur = &m_nodes[m_src].first;		// From source node to the first layer
+	m_nodes[m_src].adj = 0;		// From source node to the first layer
 	for (uint16_t i = 0; i < m_edgeNum; i++) {
-		next = new FlowEdge;
-		next->dst = i;
-		
-		*cur = next;
-		cur = &next->next;
+		m_adj[m_src][i] = m_edges.size();
+		FlowEdge edge;
+		edge.dst = i;
+		edge.next = m_edges.size() + 1;
+		m_edges.push_back(edge);
 	}
+	m_edges.back().next = UINT16_MAX;
 
 	for (uint16_t i = 0; i < m_edgeNum; i++) {	// From the first layer to the second layer
-		cur = &m_nodes[i].first;
+		m_nodes[i].adj = m_edges.size();
 		std::map<uint16_t, uint16_t> &temp = edge2node[i];
 		for (std::map<uint16_t, uint16_t>::iterator it = temp.begin(); it != temp.end(); it++) {
-			next = new FlowEdge;
-			next->dst = m_edgeNum + it->first;
-			next->cost = it->second;
-
-			*cur = next;
-			cur = &next->next;
+			m_adj[i][m_edgeNum + it->first] = m_edges.size();
+			FlowEdge edge;
+			edge.dst = m_edgeNum + it->first;
+			edge.cost = it->second;
+			edge.next = m_edges.size() + 1;
+			m_edges.push_back(edge);
 		}
+		m_edges.back().next = UINT16_MAX;
 	}
 
 	for (uint16_t i = m_edgeNum; i < m_src; i++) {	// From the second layer to destination node
-		next = new FlowEdge;
-		next->dst = m_dst;
-		// next->cost = IN_MAX;		// need to rewrite
-		next->cap = max;
-		m_nodes[i].first = next;
+		m_nodes[i].adj = m_edges.size();
+		m_adj[i][m_dst] = m_edges.size();
+		FlowEdge edge;
+		edge.dst = m_dst;
+		//edge.cost = UINT16_MAX;	// need to rewrite
+		edge.cap = max;
+		m_edges.push_back(edge);
+	}
+}
+
+void MaxFlow::MaxFlowCalculate(void)
+{
+	while (1) {
+		ResetFlag();
+		AddTag();
+		if (m_nodes[m_dst].flag == UINT16_MAX) break;
+		Adjust();
 	}
 }
 
 void MaxFlow::AddTag(void)
 {
-	m_nodes[m_src].flag = m_src;
-	m_nodes[m_src].left = UINT16_MAX;
-
-	std::set<uint16_t> cur, next;
-	cur.insert(m_src);
-	while (!cur.empty()) {
-		for (std::set<uint16_t>::iterator it = cur.begin(); it != cur.end(); it++) {
-			std::map<uint16_t, std::vector<uint16_t> > temp;
-			FlowEdge *p = m_nodes[*it].first;
-			while (p) {		
-				if (p->flow < p->cap && m_nodes[p->dst].choose)
-					temp[p->cost].push_back(p->dst);
-				p = p->next; 
-			}
-			if (temp.empty()) continue;
-
-			uint16_t min_cost = UINT16_MAX;
-			for (std::map<uint16_t, std::vector<uint16_t> >::iterator iter = temp.begin(); iter != temp.end(); iter++) {
-				if (iter->first < min_cost)
-					min_cost = iter->first;
-			}
-
-			for (std::vector<uint16_t>::iterator iter = temp[min_cost].begin(); iter != temp[min_cost].end(); iter++) {
-				if (m_nodes[*iter].flag == UINT16_MAX) {
-					m_nodes[*iter].flag = *it;
-					m_nodes[*iter].left = 1;
-					m_nodes[*iter].cost = min_cost;
-					next.insert(*iter);
-				}
-				else {
-					if (min_cost < m_nodes[*iter].cost) {
-						m_nodes[*iter].flag = *it;
-						m_nodes[*iter].cost = min_cost;
+	uint16_t adj;
+	FlowEdge *p, *q;
+	
+	/* from source node to the first layer */
+	adj = m_nodes[m_src].adj;
+	while (adj != UINT16_MAX) {
+		p = &m_edges[adj];
+		if (p->flow < p->cap) {
+			m_nodes[p->dst].flag = m_src;
+			m_nodes[p->dst].left = 1;
+		}
+		adj = p->next;
+	}
+	
+	/* from the first layer to the second layer */
+	for (uint16_t i = 0; i < m_edgeNum; i++) {
+		if (m_nodes[i].flag != UINT16_MAX) {	// link have flag
+			adj = m_nodes[i].adj;
+			while (adj != UINT16_MAX) {
+				p = &m_edges[adj];		// the first layer ---> the second layer
+				q = &m_edges[m_nodes[p->dst].adj];	// the second layer ---> destination
+				if (p->flow < p->cap && q->flow < q->cap) {	// ÓÐ¿ÉÓÃÈÝÁ¿£¬Ä¿µÄ½Úµã¿ÉÐÐ±¸Ñ¡½Úµã
+					if (m_nodes[p->dst].flag == UINT16_MAX) {  // have no flag, give flag
+						m_nodes[p->dst].flag = i;
+						m_nodes[p->dst].left = 1;
+						m_nodes[p->dst].cost = p->cost;
+					}
+					else if (p->cost < m_nodes[p->dst].cost) {	// have flag, modify flag. minimize distance
+						m_nodes[p->dst].flag = i;
+						m_nodes[p->dst].cost = p->cost;
 					}
 				}
+				adj = p->next;
 			}
 		}
-		cur = next;
-		next.clear();
+	}
+
+	/* from the second layer to destination node */
+	for (uint16_t i = m_edgeNum; i < m_src; i++) {
+		if (m_nodes[i].flag != UINT16_MAX ) {
+			if (m_nodes[m_dst].flag == UINT16_MAX) {
+				m_nodes[m_dst].flag = i;
+				m_nodes[m_dst].left = 1;
+				m_nodes[m_dst].cost = m_nodes[i].cost;
+			}
+			else if (m_nodes[i].cost < m_nodes[m_dst].cost) {
+				m_nodes[m_dst].flag = i;
+				m_nodes[m_dst].cost = m_nodes[i].cost;
+			}
+		}
 	}
 }
 
-int MaxFlow::AdjustFlow(void)
+void MaxFlow::Adjust(void)
 {
-	if (m_nodes[m_dst].flag == UINT16_MAX)
-		return 1;
-
 	uint16_t cur = m_dst;
-	uint16_t pre = m_nodes[cur].flag;
 	while (cur != m_src) {
-		FlowEdge *p = m_nodes[pre].first;
-		while (p && p->dst != cur)	
-			p = p->next;
-		p->flow += m_nodes[cur].left;
-
-		cur = pre;
-		pre = m_nodes[pre].flag;
+		m_edges[m_adj[m_nodes[cur].flag][cur]].flow++;
+		cur = m_nodes[cur].flag;
 	}
-	return 0;
 }
 
-void MaxFlow::ResetNodeFlag(void)
+void MaxFlow::ResetFlag(void)
 {
 	for (uint16_t i = 0; i < m_totalNum; i++)
 		m_nodes[i].flag = UINT16_MAX;
@@ -263,34 +224,42 @@ void MaxFlow::ResetNodeFlag(void)
 
 void MaxFlow::ReleaseFlow(uint16_t node)
 {
-	m_nodes[node].first->flow = 0;
+	/* from the second layer to destination node */
+	m_edges[m_nodes[node].adj].flow = 0;
 
 	std::set<uint16_t> temp;
+	/* from the first layer to the second layer */
+	uint16_t adj;
+	FlowEdge *p;
 	for (uint16_t i = 0; i < m_edgeNum; i++) {
-		FlowEdge *p = m_nodes[i].first;
-		while (p) {
+		adj = m_nodes[i].adj;
+		while (adj != UINT16_MAX) {
+			p = &m_edges[adj];
 			if (p->dst == node && p->flow == 1) {
 				p->flow = 0;
 				temp.insert(i);
 				break;
 			}
-			p = p->next;
+			adj = p->next;
 		}
 	}
 	
-	FlowEdge *p = m_nodes[m_src].first;
-	while (p) {
-		if (temp.find(p->dst) != temp.end())
+	/* from source node to the first layer */
+	adj = m_nodes[m_src].adj;
+	while (adj != UINT16_MAX) {
+		p = &m_edges[adj];
+		if (temp.find(p->dst) != temp.end()) {
 			p->flow = 0;
-		p = p->next;
+		}
+		adj = p->next;
 	}
 }
 
-std::vector<uint16_t> MaxFlow::GetChooseNode(void)
+std::vector<uint16_t> MaxFlow::GetChoosedNode(void)
 {
 	std::vector<uint16_t> choose;
 	for (uint16_t i = m_edgeNum; i < m_src; i++) {
-		if (m_nodes[i].first->flow != 0)
+		if (m_edges[m_nodes[i].adj].flow != 0)
 			choose.push_back(i);
 	}
 	
@@ -298,45 +267,25 @@ std::vector<uint16_t> MaxFlow::GetChooseNode(void)
 	uint16_t size = choose.size();
 	for (uint16_t i = 0; i < size; ++i) {
 		for (uint16_t j = i + 1; j < size; ++j) {
-			if (m_nodes[choose[i]].first->flow > m_nodes[choose[j]].first->flow) {
+			if (m_edges[m_nodes[choose[i]].adj].flow > m_edges[m_nodes[choose[j]].adj].flow) {
 				uint16_t temp = choose[i];
 				choose[i] = choose[j];
 				choose[j] = temp;
 			}
 		}
 	}
-
 	return choose;
 }
 
 bool MaxFlow::IsCoverAll(void)
 {
-	FlowEdge *p = m_nodes[m_src].first;
-	while (p && p->flow == 1)
-		p = p->next;
-
-	if (p)
-		return false;
-	else
-		return true;
-}
-
-void MaxFlow::ShowNode(void)
-{
-	for (size_t i = 0; i < m_nodes.size(); i++)
-		std::cout << i << " (" << m_nodes[i].flag << "," << m_nodes[i].left << ")\n";
-}
-
-void MaxFlow::ShowEdge(void)
-{
-	for (size_t i = 0; i < m_nodes.size(); i++) {
-		FlowEdge *p = m_nodes[i].first;
-		while (p) {
-			if (p->flow != 0)
-				std::cout << i << "-->" << p->dst << "(" << p->flow << ")\n";
-			p = p->next;
-		}
+	uint16_t adj = m_nodes[m_src].adj;
+	while (adj != UINT16_MAX){
+		if (m_edges[adj].flow == 0)
+			return false;
+		adj = m_edges[adj].next;
 	}
+	return true;
 }
 
 }	// namespace ns3

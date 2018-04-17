@@ -94,20 +94,10 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   /**
    * max-flow calculate
    */
-  /*MaxFlow maxflow;
+  MaxFlow maxflow;
   maxflow.Calculate(topo, 2, 8);    // depth = 2, max = 8;
-  std::map<uint16_t, std::set<uint16_t> > solution;
-  maxflow.Solution(solution);
-  // show result
-  for (std::map<uint16_t, std::set<uint16_t> >::iterator iter = solution.begin(); iter != solution.end(); ++iter) {
-    std::cout << "switch " << iter->first << "(" << iter->second.size() << "): ";
-    for (std::set<uint16_t>::iterator it = iter->second.begin(); it != iter->second.end(); ++it) {
-      Edge &edge = topo->m_edges[*it];
-      std::cout << "<" << edge.src << "," << edge.dst << ">, ";
-    }
-    std::cout << std::endl;
-  }
-  StartDelayMeasure(solution);*/
+  std::map<uint16_t, std::set<uint16_t> > solution = maxflow.Solution(true);
+  StartDelayMeasure(solution);
 
   /**
    * Set data flow entry
@@ -122,7 +112,7 @@ void SimpleController::SetTopology(Ptr<Topology> topo)
   /**
    * load banlance
    */
-  StartLoadBanlance();
+  // StartLoadBanlance();
 }
 
 void SimpleController::AddSwitch (Ptr<OpenFlowSwitchNetDevice> swtch)

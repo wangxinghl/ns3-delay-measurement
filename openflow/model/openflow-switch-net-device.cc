@@ -862,7 +862,7 @@ OpenFlowSwitchNetDevice::ReceiveFromDevice (Ptr<NetDevice> netdev, Ptr<const Pac
                   if (packet->PeekPacketTag (probeTag)) {   // Check whether it's probe packet
                     m_ports[i].rx_packets++;
                     m_ports[i].rx_bytes += packet->GetSize() + 18;
-                    Simulator::Schedule (NanoSeconds(10), &OpenFlowSwitchNetDevice::TranspondProbe, this, packet, i);
+                    Simulator::Schedule (m_lookupDelay, &OpenFlowSwitchNetDevice::TranspondProbe, this, packet, i);
                     return;
                   }
                   /***************wangxing added***************/

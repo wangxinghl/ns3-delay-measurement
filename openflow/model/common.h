@@ -27,7 +27,6 @@ const Time UTILIZATION_PERIOD = Seconds(0.1);
 
 const Time OUTPUT_FILE_PERIOD = Seconds(0.1);
 
-
 /**
  * The definition of edge.
  */
